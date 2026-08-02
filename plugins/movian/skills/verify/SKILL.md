@@ -137,3 +137,5 @@ while you keep observing. Do not spin indefinitely.
 - `references/media-playback-smoke.md` — playback evidence levels
 - `references/glw-async-focus.md` — deterministic focus on async-loading pages
 - `references/glw-pointer-touch-smoke.md` — pointer/touch/kinetic-scroll matrix
+- `references/plugin-type-patterns.md` — what to exercise per plugin type: media
+  source, protocol, UI/skin, service integration, native/compiled
