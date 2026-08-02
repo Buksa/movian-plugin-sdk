@@ -1,0 +1,19 @@
+{
+  "name": "movian-plugin-sdk",
+  "owner": {
+    "name": "Buksa"
+  },
+  "metadata": {
+    "description": "Portable development layer for Movian plugins."
+  },
+  "plugins": [
+    {
+      "name": "movian",
+      "description": "Movian plugin development: locate the core, build, launch, verify.",
+      "author": {
+        "name": "Buksa"
+      },
+      "source": "./plugins/movian"
+    }
+  ]
+}

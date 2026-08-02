@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# movian-lsp shim — serves .view/.js from any project, core checkout or plugin repo.
+# Contract: movian-plugin-sdk#3. Stood up by movian-plugin-sdk#12.
+#
+# The previous version was `exec "$PWD/support/devtools/movian-lsp"`, which assumed
+# the caller's cwd WAS a core checkout. omp spawns LSP servers with cwd set to the
+# project root, so that worked in core worktrees and failed in every plugin repo
+# (a plugin repo has no support/devtools/). Kept as movian-lsp.bak-20260802.
+#
+# Resolution is additive, so core-worktree behaviour is unchanged:
+#   1. cwd is itself a core checkout -> use ITS server (a worktree under test must
+#      run its own analyzer, not another checkout's).
+#   2. otherwise -> the designated core, via the SDK locator.
+set -euo pipefail
+
+if [ -x "$PWD/support/devtools/movian-lsp" ]; then
+  exec "$PWD/support/devtools/movian-lsp" "$@"
+fi
+
+. "$HOME/.local/lib/movian-sdk/locate.sh"
+
+movian_sdk_locate || exit 1
+exec "$MOVIAN_SDK_CORE/support/devtools/movian-lsp" "$@"

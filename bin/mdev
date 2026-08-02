@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# mdev shim — resolves the designated Movian core and hands off to its own mdev.
+# Contract: movian-plugin-sdk#3. Stood up by movian-plugin-sdk#12.
+set -euo pipefail
+
+. "$HOME/.local/lib/movian-sdk/locate.sh"
+
+# `mdev doctor` is answered HERE, not by the core: the locator facts (which core,
+# how it resolved) are the shim's knowledge. The core's own `mdev lsp doctor`
+# stays untouched and is delegated to at the end.
+if [ "${1:-}" = "doctor" ]; then
+  shift
+  rc=0
+  if ! movian_sdk_locate; then
+    echo "locator: UNRESOLVED"
+    exit 1
+  fi
+  echo "core:      $MOVIAN_SDK_CORE"
+  echo "resolved:  via $MOVIAN_SDK_CORE_SOURCE"
+
+  bin="$MOVIAN_SDK_CORE/build.debug/movian"
+  echo "binary:    $(date -r "$bin" '+%Y-%m-%d %H:%M:%S') ($("$bin" --help 2>/dev/null | head -1))"
+
+  if git -C "$MOVIAN_SDK_CORE" rev-parse --git-dir >/dev/null 2>&1; then
+    head_sha="$(git -C "$MOVIAN_SDK_CORE" rev-parse --short HEAD)"
+    branch="$(git -C "$MOVIAN_SDK_CORE" branch --show-current)"
+    echo "checkout:  $branch @ $head_sha$(git -C "$MOVIAN_SDK_CORE" diff --quiet 2>/dev/null || echo ' (dirty)')"
+
+    newer="$(find "$MOVIAN_SDK_CORE/src" -name '*.c' -newer "$bin" 2>/dev/null | wc -l)"
+    if [ "$newer" -gt 0 ]; then
+      echo "freshness: $newer C source file(s) newer than the binary — rebuild if that matters"
+    else
+      echo "freshness: binary is newer than all C sources"
+    fi
+
+    if git -C "$MOVIAN_SDK_CORE" rev-parse --verify origin/movian6 >/dev/null 2>&1; then
+      behind="$(git -C "$MOVIAN_SDK_CORE" rev-list --count HEAD..origin/movian6 2>/dev/null)"
+      echo "upstream:  $behind commit(s) behind origin/movian6 (as last fetched)"
+    fi
+  fi
+
+  for tool in mdev mdevlib metadata movian-lsp lsp analyze smokes viewpreview gdb; do
+    [ -e "$MOVIAN_SDK_CORE/support/devtools/$tool" ] || { echo "devtools:  MISSING $tool"; rc=1; }
+  done
+  [ "$rc" -eq 0 ] && echo "devtools:  complete"
+
+  echo
+  echo "--- core: mdev lsp doctor ---"
+  "$MOVIAN_SDK_CORE/support/devtools/mdev" lsp doctor || rc=$?
+  exit "$rc"
+fi
+
+movian_sdk_locate || exit 1
+exec "$MOVIAN_SDK_CORE/support/devtools/mdev" "$@"
