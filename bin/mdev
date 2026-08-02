@@ -3,7 +3,8 @@
 # Contract: movian-plugin-sdk#3. Stood up by movian-plugin-sdk#12.
 set -euo pipefail
 
-. "$HOME/.local/lib/movian-sdk/locate.sh"
+MOVIAN_SDK_LIB="${MOVIAN_SDK_LIB:-$HOME/.local/lib/movian-sdk}"  # rewritten by install.sh
+. "$MOVIAN_SDK_LIB/locate.sh"
 
 # `mdev doctor` is answered HERE, not by the core: the locator facts (which core,
 # how it resolved) are the shim's knowledge. The core's own `mdev lsp doctor`

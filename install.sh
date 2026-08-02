@@ -19,14 +19,19 @@ core="${1:-}"
 mkdir -p "$bindir" "$libdir" "$(dirname "$config")"
 
 # Never clobber silently: an existing file that differs is backed up first.
+# Shims carry a default MOVIAN_SDK_LIB; rewrite it so a non-default --libdir
+# install produces a shim that actually finds its own resolver.
 install_file() {
-  local src="$1" dst="$2"
-  if [ -e "$dst" ] && ! cmp -s "$src" "$dst"; then
+  local src="$1" dst="$2" tmp
+  tmp="$(mktemp)"
+  sed "s|^MOVIAN_SDK_LIB=.*|MOVIAN_SDK_LIB=\"\${MOVIAN_SDK_LIB:-$libdir}\"|" "$src" > "$tmp"
+  if [ -e "$dst" ] && ! cmp -s "$tmp" "$dst"; then
     local bak="$dst.bak-$(date +%Y%m%d%H%M%S)"
     cp -p "$dst" "$bak"
     echo "  backed up existing $dst -> $bak"
   fi
-  install -m 755 "$src" "$dst"
+  install -m 755 "$tmp" "$dst"
+  rm -f "$tmp"
   echo "  installed $dst"
 }
 
