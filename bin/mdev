@@ -6,6 +6,15 @@ set -euo pipefail
 MOVIAN_SDK_LIB="${MOVIAN_SDK_LIB:-$HOME/.local/lib/movian-sdk}"  # rewritten by install.sh
 . "$MOVIAN_SDK_LIB/locate.sh"
 
+# `mdev core` prints the resolved core root and nothing else, so docs and scripts
+# can reach into the checkout from a plugin repo:
+#   (cd "$(mdev core)/support/devtools" && python3 -m mdevlib.movian_agent ...)
+if [ "${1:-}" = "core" ]; then
+  movian_sdk_locate || exit 1
+  printf '%s\n' "$MOVIAN_SDK_CORE"
+  exit 0
+fi
+
 # `mdev doctor` is answered HERE, not by the core: the locator facts (which core,
 # how it resolved) are the shim's knowledge. The core's own `mdev lsp doctor`
 # stays untouched and is delegated to at the end.
