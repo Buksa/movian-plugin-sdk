@@ -22,3 +22,20 @@ worktree.
 
 Adapting it is #14's job: it is written for the Mimo runtime and assumes a core
 checkout as cwd, which the locator contract has since replaced.
+
+## `plugin-findings/`
+
+Also rescued by [#13](https://github.com/Buksa/movian-plugin-sdk/issues/13), from
+the same untracked directory.
+
+`anilibria-review-vs-hdrezka.md` is a review of `movian-plugin-anilibria` against
+the Movian ecmascript API sources and HDRezka as reference implementation. It
+reports **4 bugs (2 critical) and 9 code-quality issues** — `page.redirect()`
+called on the module object, a non-existent `apiUrlSetting.set()`, a schedule
+response-format mismatch, an invalid sorting value.
+
+**None of it is verified**, and fixing plugins is out of this map's scope. It is
+kept because `movian-plugin-anilibria` has no remote and therefore no issue
+tracker, so this file is the only record. Once
+[Where is plugin work tracked?](https://github.com/Buksa/movian-plugin-sdk/issues/6)
+decides where plugin work lives, these findings belong there — verified first.
