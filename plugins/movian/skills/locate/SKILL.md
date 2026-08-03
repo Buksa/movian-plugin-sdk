@@ -79,6 +79,31 @@ Every failure names the offending path and the fix. The common ones:
 - **`mdev lsp doctor` reports `movian-analyze` missing** — that target is not
   part of the default build. Add it: `make BUILD=debug -j$(nproc) movian-analyze`.
 
+## Editor and agent intelligence
+
+`movian-lsp` serves both `.view` and plugin `.js`. A plugin repo enables it with
+one file at its root, `.lsp.json`:
+
+```json
+{
+  "servers": {
+    "movian-lsp": {
+      "command": "movian-lsp",
+      "args": ["--stdio"],
+      "fileTypes": [".view", ".js"],
+      "rootMarkers": ["plugin.json"]
+    }
+  }
+}
+```
+
+`command` is the **shim on `PATH`**, not a path into the core — the shim resolves
+the core itself, which is what makes one config work in every repo. `plugin.json`
+as the root marker scopes it to plugin repos rather than any git checkout.
+
+Confirm it took: an OMP session in the repo lists `movian-lsp .view .js` under
+LSP Servers instead of `No LSP servers`.
+
 ## Installing the shims
 
 The shims are executables on `PATH`, so the Claude Code plugin cannot deliver
