@@ -69,14 +69,52 @@ its exit code.
 ## Isolated single-view preview
 
 ```
-mdev preview /abs/path/to/file.view [--fixture /abs/path/fixture.json] [--shot]
+mdev preview <file.view> [--fixture <fixture.json>] [--shot]
+
+# e.g. from the plugin repo root:
+mdev preview views/episodes.view --fixture fixtures/episodes.json --shot
 ```
 
 Renders one view with no navbar, sidebar or directory chrome around it, through
 a `page.type = "raw"` page whose `metadata.glwview` points straight at your file.
-The fixture JSON schema (v1: `metadata` / `args` / `nodes`, all optional) is
-documented at `$(mdev core)/support/devtools/viewpreview/README.md` — read it
-before authoring a fixture.
+
+**The fixture is JSON, not a view.** It supplies the page model your view binds
+against, so you can iterate on markup without a live data source. Fixtures belong
+in your plugin repo next to the views they feed — nothing scaffolds them for you,
+so the first one is written by hand.
+
+Schema v1, all three top-level keys optional (an empty `{}` is valid):
+
+```json
+{
+  "metadata": { "title": "Episodes", "subtitle": "Season 2" },
+  "args":     { "id": "42" },
+  "nodes": [
+    { "type": "item", "url": "x:1",
+      "metadata": { "title": "Episode 1", "icon": "../fixtures/img/ep1.png" } }
+  ]
+}
+```
+
+- `metadata` lands on `$self.model.metadata.*`, `args` on `$self.args.*`.
+- Each `nodes[]` entry becomes one `page.appendItem(url, type, metadata)`, i.e.
+  one child of `$self.model.nodes`. Extra keys on a node are copied onto that
+  node's own prop root verbatim — that is how a cloner reaches `$self.episode`.
+- Any other top-level key is copied onto `$self.model.*` verbatim.
+- Unknown keys are **never rejected**; they simply become props.
+
+Full schema and worked examples: `$(mdev core)/support/devtools/viewpreview/`
+— `README.md`, plus `fixtures/minimal.json` (metadata only),
+`fixtures/directory-nodes.json` (12 items) and `views/demo-list.view`, the target
+view that consumes both.
+
+**A broken preview is never a silent black screen.** A missing view, a missing
+fixture, malformed fixture JSON, or any exception applying it is caught: the page
+switches to the preview plugin's own `error.view`, the message appears on screen
+in `page.metadata.viewpreviewError` **and** in the log as
+`viewpreview: ERROR: <message>`. A GLW parse error in the target view cannot be
+caught in JS, but is logged as `GLW [ERROR]: Error <file>:<line>: <message>`.
+`mdev preview` greps for both patterns and **exits 1** if either appears.
 
 Worth restating:
 
