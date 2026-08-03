@@ -62,7 +62,7 @@ A route smoke passes when:
 - `/api/open` reaches the expected plugin route (`mdev open` verifies this);
 - `global/navigators/current/currentpage/model/loading` is `0` **or**
   void/absent — some routes (e.g. any static `page:*` URL) never create this prop;
-  see `movian-plugin-testing/SKILL.md`'s page-ready section;
+  see this skill's SKILL.md page-ready section;
 - `global/navigators/current/currentpage/model/metadata/title` is expected;
 - required metadata exists under `currentpage/model/metadata`;
 - important rows under `currentpage/model/nodes/*N` have expected `type`,

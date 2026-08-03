@@ -40,7 +40,7 @@ long-running instance and a throwaway one do not collide.
 
 `--dev-flags k=1` seeds `<persistent>/settings/dev` as JSON before launch — the
 profile-scoped way to turn on subsystem debug output (`smbdebug=1` and friends).
-See `references/debug-flags.md` for the full flag surface.
+See `movian:verify` → `references/debug-flags.md` for the full flag surface.
 
 ## Observing
 

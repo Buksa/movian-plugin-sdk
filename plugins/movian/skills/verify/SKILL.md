@@ -106,19 +106,113 @@ a different question was already judged for the same image.
 This saves external quota, because GLW static-page rendering is deterministic. A
 matching hash proves identity; it never proves non-identity.
 
-## Verification minimums by change class
+## The evidence ladder
 
-- **Plugin JS change** — `node --check`, `git diff --check`, a focused smoke of
-  the affected route, a screenshot when the change is visual, and a log grep for
-  new JS/GLW/image errors.
-- **`.view` change** — before/after screenshot, plus the reload false-green
-  caveat above. A clean exit code alone is never sufficient for anything touching
-  quoting or lexing.
-- **Media/protocol change** — prove the specific layer under test: `routed`,
-  `probed`, `decoded` or `rendered` (see `references/media-playback-smoke.md`).
-  That a URL dispatched proves only routing.
-- **Crash or hang** — preserve artifacts (command, log tail, screenshot, exit
-  status) instead of repeating the same failing smoke.
+Five levels. Each is a different **kind** of claim, not a different amount of
+effort.
+
+| | evidence | proves | does not prove |
+|---|---|---|---|
+| **L0** static | `node --check`, `tsc --noEmit` against `mdev types`, `git diff --check` | the file parses; the modules and members it names exist | that a single line runs |
+| **L1** loads | the plugin appears in the log with no load-time error | manifest and entry point are valid | that any route works |
+| **L2** route | `mdev open <url>` reaches page-ready | navigation reached your handler and it returned | that the page holds the right thing |
+| **L3** state | `mdev props` shows the specific values under test | the change's effect on the model | that any of it is visible |
+| **L4** visual | `mdev shot`, inspected | what the user actually sees | why it looks that way |
+
+**A lower level passing never implies a higher one. A higher level passing does
+imply the lower ones** — you cannot render a route you failed to load. So verify
+at the highest level your change can reach, and say which level you reached.
+
+Playback is not a sixth rung; it is a **sub-ladder inside L3–L4** —
+`routed` → `probed` → `decoded` → `rendered`, each proving only its own layer
+(`references/media-playback-smoke.md`).
+
+## The gate underneath the ladder
+
+Before trusting evidence at any level, prove the instance is alive:
+
+```
+mdev smoke run health --name <the instance you just launched>
+```
+
+Pass the **same `--name` you launched**, or you are probing a different process
+than the one you are about to trust. Exit 2 means `mdev stop` and relaunch, not
+retry.
+
+A wedged GLW instance keeps answering HTTP while dispatching nothing, so it
+manufactures a plausible failure at every level at once — an open that returns
+200 and never navigates, a screenshot that times out, props frozen at their
+startup values. Read this failure as a bad instance, never as a bad plugin
+(`references/CONSTRAINTS.md`).
+
+## Mandatory level by change class
+
+| change | mandatory | plus |
+|---|---|---|
+| Refactor, logging, no user-visible effect | **L2** on one affected route | L0 |
+| Model contents — metadata, rows, search results | **L3** on the named props | L0, error-delta grep |
+| Navigation or routing | **L2** including expected `currentpage.url` | L0 |
+| `.view` | **L4** before/after | never the reload exit code alone |
+| Settings or kvstore | **L3** on the setting prop, **and a second run** proving it survived the restart | L0 |
+| Playback | the named media sub-level; **L4 for anything with video** | a standalone probe first, when the protocol has one |
+| Crash or hang | no level applies — preserve command, log tail, screenshot, exit status | do not repeat the failing smoke |
+| Unchanged plugin, newer core | **L2** | the `mdev doctor` line for both cores |
+
+L0 is the cheapest real bug filter and costs nothing, so it is listed as *plus*
+rather than optional. Its limits are exact and worth knowing before trusting a
+clean result — see the `movian:api` skill.
+
+## Not acceptable as proof
+
+Consolidated; each is explained where it is listed.
+
+1. **HTTP 200, or an `eventSink` `OK`** — transport only (above).
+2. **`loading == 0` alone** — page-ready trap (above).
+3. **A clean `mdev reload`/`preview` exit for a `.view` syntax change** — the
+   lexer blind spot (above).
+4. **A matching screenshot hash as evidence of *no* change** — identity only
+   (above).
+5. **A clean `tsc` as evidence a call is correct** — declarations are `any`-heavy
+   and arity-free by design (`movian:api`).
+6. **A member missing from the `.d.ts` as evidence of a bug** — modules mutate
+   their own exports at runtime (`movian:api`).
+7. **A fixed `sleep` followed by a read** — wait for the prop that proves the
+   flow (above).
+8. **Log silence**, when you never grepped the delta (above).
+9. **One run of anything that talks to a remote service** — see below.
+10. **"It worked on my core"** — without recording which core.
+
+## Where plugin verification differs from core verification
+
+The rules above are mostly the core's, and they transfer. Four things do not.
+
+**The core is a variable too.** A core change is verified against a tree you
+own; a plugin is verified against a core the plugin author does not control and
+the plugin user will not match. A red run can mean the plugin is wrong, or that
+this core predates the API it calls. Record the provenance with the verdict —
+one line of `mdev doctor` gives checkout, HEAD, binary build time and distance
+from `origin/movian6`. A verdict without it is not reproducible by anyone else.
+
+**The usual cause of a red run is not your change.** Core smokes fail from the
+code under test. Plugin smokes mostly fail from the far end of an HTTP call —
+schema drift, expired token, geo-block, rate limit — and every one of those
+presents as a plugin bug. Before calling it one, run the **control**: the same
+smoke on the unchanged code, or the same request outside Movian with `curl`. A
+failure that reproduces without your change is not your change.
+
+**There is no regression suite, and the plugin cannot ship one.** `mdev smoke`
+runs declarative JSON smokes, but discovery is core-only: `SMOKES_DIR` is
+hardcoded to `<core>/support/devtools/smokes`, and a relative `needs.plugin`
+resolves against the core root, not the plugin repo. So a plugin's smokes
+currently have to be written into somebody else's checkout
+([movian#164](https://github.com/Buksa/movian/issues/164)). Until that is fixed,
+keep the smoke as a script in the plugin repo and run it by hand — do not add
+plugin smokes to the core.
+
+**Nothing needs rebuilding, so re-verify per edit.** Plugin JS and `.view` reload
+into a live instance, which makes verification cheap enough to run after each
+edit instead of batching it to the end. It also removes a whole class of core
+explanation: a stale build is never why a plugin change did not take.
 
 ## Stop blind waiting at 120 seconds
 

@@ -35,7 +35,7 @@ launching or interpreting Movian plugin smokes.
 - Do not treat `loading=0` alone as success. Require the expected title and,
   for redirects/protocol roots, the expected `currentpage.url`. (Also:
   `loading` can be legitimately void/absent for routes that never create the
-  prop — see `movian-plugin-testing/SKILL.md`.)
+  prop — see `movian:verify`.)
 - Do not activate ordinary appendItem rows with event sinks when the URL is
   available. Read the row URL and call `/api/open`; reserve event sinks for
   action rows, popups, and option controls.
@@ -57,7 +57,7 @@ launching or interpreting Movian plugin smokes.
   capture is an explicit acceptance criterion.
 - Do not trust a clean `mdev reload`/`mdev preview` exit code as full proof
   for a `.view` change — see the reload false-green note in
-  `movian-plugin-testing/SKILL.md` (tracked as #92).
+  `movian:verify` (tracked as #92).
 
 ## Shell And Git Hygiene
 
