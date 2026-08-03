@@ -15,6 +15,41 @@ if [ "${1:-}" = "core" ]; then
   exit 0
 fi
 
+# `mdev types` materialises the generated Plugin API declarations into the current
+# repo, so a committed tsconfig.json can reference a stable relative path instead
+# of a machine-specific one. A symlink by default: it cannot go stale as the core
+# is rebuilt. `--copy` vendors a snapshot instead, for a repo that must typecheck
+# without a core checkout.
+if [ "${1:-}" = "types" ]; then
+  shift
+  movian_sdk_locate || exit 1
+  src="$MOVIAN_SDK_CORE/generated/movian-api.d.ts"
+  out="types/movian-api.d.ts"
+  mode="link"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --copy) mode="copy" ;;
+      --out) shift; out="$1" ;;
+      *) echo "mdev types: unknown argument '$1'" >&2; exit 2 ;;
+    esac
+    shift
+  done
+  if [ ! -f "$src" ]; then
+    echo "mdev types: $src does not exist." >&2
+    echo "  fix: cd '$MOVIAN_SDK_CORE' && python3 support/devtools/metadata/gen.py" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$out")"
+  if [ "$mode" = "copy" ]; then
+    cp -f "$src" "$out"
+  else
+    ln -sfn "$src" "$out"
+  fi
+  echo "$out -> $src ($mode)"
+  echo "note: gitignore it unless you deliberately vendor a snapshot."
+  exit 0
+fi
+
 # `mdev doctor` is answered HERE, not by the core: the locator facts (which core,
 # how it resolved) are the shim's knowledge. The core's own `mdev lsp doctor`
 # stays untouched and is delegated to at the end.

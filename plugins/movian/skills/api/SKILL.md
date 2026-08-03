@@ -69,11 +69,38 @@ app, so check syntax level before blaming logic.
 
 ## Type checking a plugin
 
-Point the plugin's `tsconfig.json` at the generated bundle so `tsc --noEmit`
-resolves Movian modules instead of erroring on every `require()`. Because the
-declarations are `any`-heavy, this catches **wrong module and wrong member**
-names, not wrong argument types — still the cheapest real bug filter available
-for a Movian plugin.
+```
+mdev types                    # symlink the bundle into ./types/
+echo 'types/movian-api.d.ts' >> .gitignore
+```
+
+Then include `types/**/*.d.ts` in `tsconfig.json`. Never put the core's absolute
+path in a committed `tsconfig` — `mdev types` exists so the config can name a
+stable relative path. The symlink cannot go stale as the core is rebuilt; `mdev
+types --copy` vendors a snapshot instead, for a repo that must typecheck without
+a core checkout.
+
+Measured on `movian-plugin-trakt`: `tsc` could not resolve a single Movian
+module before, and resolves all of them after.
+
+**Three limits worth knowing before you trust a result:**
+
+1. **`any`-heavy.** This catches wrong *module* and wrong *member* names, not
+   wrong argument types.
+2. **No `showtime/*` modules are declared**, yet they work — the core rewrites
+   `showtime/X` to `movian/X` at require time (`src/ecmascript/ecmascript.c:436-440`).
+   A legacy-style plugin will show false `Cannot find module` errors for them.
+3. **Modules mutate their own exports at runtime.** `movian/settings` statically
+   exports only `globalSettings` and `kvstoreSettings`, but
+   `settings.globalSettings(...)` called *as a method* sets `this.__proto__` on
+   the module object, after which `settings.createBool` and friends exist. So a
+   member the bundle does not declare is not proof of a bug — read the module
+   source before calling it one.
+
+If the plugin already has hand-written declarations for the same modules, **do
+not add the bundle alongside them**: ambient declarations of the same module name
+merge, and duplicate members become `TS2451 Cannot redeclare`. Measured on
+HDRezka: 28 errors became 61, forty of them redeclarations.
 
 ## Gotchas that cost people time
 
