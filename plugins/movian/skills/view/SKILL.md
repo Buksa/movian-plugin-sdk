@@ -80,9 +80,15 @@ before authoring a fixture.
 
 Worth restating:
 
-- Pass **absolute paths**. `mdev preview` and `mdev watch --dir` resolve relative
-  paths against the *core checkout*, not your cwd — the one place in the harness
-  where that is true.
+- **Relative paths work, but only because the shim fixes them.** The core's
+  `mdev preview` and `mdev watch --dir` absolutise a relative path against the
+  *core checkout* rather than your cwd (`resolve_repo_path`,
+  `mdevlib/cli.py:452-458`) — the one place in the harness that does, since `-p`
+  and `--skin` both use the caller's cwd. From a plugin repo that would aim
+  `mdev preview views/x.view` at `<core>/views/x.view`. The `mdev` shim rewrites
+  such an argument to an absolute path when it exists relative to your cwd, and
+  leaves it alone otherwise, so the core's own fallback still applies. If you
+  invoke the core's `mdev` directly instead of the shim, pass absolute paths.
 - The preview instance always launches with `--bypass-ecmascript-acl`. Without it
   the ECMAScript file ACL (`filename_is_allowed()`, `src/ecmascript/es_fs.c:91`)
   confines the preview plugin's reads to its own directory, and it must read your

@@ -61,4 +61,46 @@ if [ "${1:-}" = "doctor" ]; then
 fi
 
 movian_sdk_locate || exit 1
+
+# `mdev preview <view> [--fixture f]` and `mdev watch --dir <d>` absolutise a
+# relative path against the CORE checkout, not the caller's cwd
+# (mdevlib/cli.py: resolve_repo_path). From a plugin repo that silently aims at
+# a path inside the core that does not exist -- `mdev preview views/x.view` in a
+# plugin becomes "<core>/views/x.view". Every other path argument (-p, --skin)
+# already uses the caller's cwd, so this one is the odd one out.
+#
+# Fixing it in the core is out of this layer's scope, but the shim is exactly
+# where caller-cwd knowledge belongs. Rewrite such an argument to an absolute
+# path **only when it actually exists relative to the cwd** -- so the core's
+# repo-relative fallback still resolves anything that does not, and a core
+# developer sees no change.
+absolutise() {
+  case "$1" in
+    /*) printf '%s\n' "$1"; return ;;
+  esac
+  if [ -e "$PWD/$1" ]; then
+    printf '%s\n' "$(cd "$(dirname "$PWD/$1")" && pwd)/$(basename "$1")"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+case "${1:-}" in
+  preview|watch)
+    args=("$1"); shift
+    prev=""
+    for a in "$@"; do
+      # Rewrite a bare path-shaped argument that exists relative to cwd.
+      # Skip anything option-shaped, and skip the value of --name, which is an
+      # instance label and could collide with a directory of the same name.
+      case "$a" in
+        -*) ;;
+        *) [ "$prev" = "--name" ] || a="$(absolutise "$a")" ;;
+      esac
+      args+=("$a"); prev="$a"
+    done
+    set -- "${args[@]}"
+    ;;
+esac
+
 exec "$MOVIAN_SDK_CORE/support/devtools/mdev" "$@"
