@@ -17,19 +17,14 @@ material — test recipes per plugin type — became
 `plugins/movian/skills/verify/references/plugin-type-patterns.md`. The rest
 duplicated the `movian:run` loop and was deliberately not carried over.
 
-## `plugin-findings/`
+## `plugin-findings/` — cleared
 
-Also rescued by [#13](https://github.com/Buksa/movian-plugin-sdk/issues/13), from
-the same untracked directory.
+Held the anilibria review. Resolved by
+[#17](https://github.com/Buksa/movian-plugin-sdk/issues/17): the local anilibria
+turned out to be a **separate plugin** (`id: anilibria`) rather than a version of
+`Buksa/movian-plugin-anilibria.tv` (`id: anilibria.tv`), and now lives as the
+`Buksa/single-file-plugin` branch of that repo. The review went with it as
+`docs/review-vs-hdrezka.md`, marked historical — its findings were already fixed
+by the commits it motivated.
 
-`anilibria-review-vs-hdrezka.md` is a review of `movian-plugin-anilibria` against
-the Movian ecmascript API sources and HDRezka as reference implementation. It
-reports **4 bugs (2 critical) and 9 code-quality issues** — `page.redirect()`
-called on the module object, a non-existent `apiUrlSetting.set()`, a schedule
-response-format mismatch, an invalid sorting value.
-
-**None of it is verified**, and fixing plugins is out of this map's scope. It is
-kept because `movian-plugin-anilibria` has no remote and therefore no issue
-tracker, so this file is the only record. Once
-[Where is plugin work tracked?](https://github.com/Buksa/movian-plugin-sdk/issues/6)
-decides where plugin work lives, these findings belong there — verified first.
+`salvage/` is now empty of content; it stays for the next rescue.
