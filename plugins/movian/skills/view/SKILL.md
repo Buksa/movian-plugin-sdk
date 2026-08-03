@@ -38,9 +38,10 @@ mdev reload [--shot]     # after each edit
 mdev watch --shot        # or auto-reload on every save
 ```
 
-`reload`/`watch` send the `ReloadUI` action, which is a **full view-cache
-flush**: the whole widget tree is destroyed and `universe.view` is rebuilt from
-scratch. Every `.view` under the active skin is re-parsed on every reload, not
+`reload`/`watch` send the `ReloadUI` action (handled at `src/ui/glw/glw.c:2522`),
+which is a **full view-cache flush** (`glw_load_universe()`,
+`src/ui/glw/glw.c:404-423`): the whole widget tree is destroyed and
+`universe.view` is rebuilt from scratch. Every `.view` under the active skin is re-parsed on every reload, not
 just the file you edited — so an unrelated view with a pre-existing error will
 surface on every reload. That also makes reload a full-fidelity replay of a fresh
 launch's view loading.
@@ -82,11 +83,17 @@ Worth restating:
 - Pass **absolute paths**. `mdev preview` and `mdev watch --dir` resolve relative
   paths against the *core checkout*, not your cwd — the one place in the harness
   where that is true.
+- The preview instance always launches with `--bypass-ecmascript-acl`. Without it
+  the ECMAScript file ACL (`filename_is_allowed()`, `src/ecmascript/es_fs.c:91`)
+  confines the preview plugin's reads to its own directory, and it must read your
+  fixture and view from anywhere. Required, not a convenience.
 - Target views must bind through `$self.model.*` / `$self.args.*`, **not**
   `$page.*`. Some third-party plugin views use `$page.*` by convention, but it
-  has no scope root in this core and will silently bind nothing.
+  has no scope root in this core (`src/ui/glw/glw_scope.c:54-61`,
+  `src/ui/glw/glw.h:290-297`) and will silently bind nothing.
 - Views can be referenced by a plain absolute filesystem path — no scheme prefix
-  or symlink needed.
+  or symlink needed (`fa_resolve_proto`, `src/fileaccess/fileaccess.c:99-113`: no
+  `scheme://` means "assume a plain file").
 - Reusing an already-running instance that was not started with the preview
   plugin will fail to resolve the preview route. Use a dedicated `--name`, or
   `mdev stop --name preview` first.
@@ -100,7 +107,9 @@ rounds on the pilot page; follow it in order.
    schema-v1 fixture (`metadata` for page-level fields, extra top-level keys land
    on `$self.model.*`, `nodes[]` for list rows, per-node extra keys on the node
    root). Generate placeholder art — never commit third-party images. Relative
-   `source:` paths resolve against the *view file's* directory.
+   `source:` paths resolve against the *view file's* directory
+   (`glw_resolve_path` -> `fa_absolute_path`, `src/ui/glw/glw_view_attrib.c:36-59`),
+   so `"../fixtures/" + $self.metadata.icon` works from `views/`.
 2. **Write convergence criteria before the first render.** Must match: element
    presence and nesting, column proportions, alignment, focus state. Accepted
    deltas: fonts and antialiasing, exact colours, placeholder art, icon glyphs.
@@ -143,6 +152,11 @@ widget(container_x, {
 });
 ```
 
+Anchor: `src/ui/glw/glw_view_attrib.c:1382` — `{"debug", mod_flag, GLW2_DEBUG,
+mod_flags2}`. `GLW2_DEBUG` also enables `PROP_SUB_DEBUG` in `glw_view_eval.c`,
+and the widget-local prints live in `glw_image.c`, `glw_text_bitmap.c` and
+`glw_container.c`.
+
 Remove it before shipping unless the task explicitly wants it kept.
 
 ## `--debug-glw` and its two limits
@@ -159,8 +173,8 @@ runtime-verified log examples. Two documented limits:
 
 ## Skin overrides
 
-`mdev run --skin <dir>` points GLW at an alternate skin directory instead of the
-default. Iterate on a copy rather than the tracked tree:
+`mdev run --skin <dir>` (core flag, parsed at `src/main.c:733-735`) points GLW at
+an alternate skin directory instead of the default. Iterate on a copy rather than the tracked tree:
 
 ```
 cp -r "$(mdev core)/glwskins/flat" /tmp/skin-experiment
