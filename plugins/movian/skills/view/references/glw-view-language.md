@@ -8,7 +8,7 @@ and are cited separately as `(corpus: path:line)`.
 
 Companion docs: `glw-widget-catalog.md` (every registered widget class),
 `glw-patterns.md` (worked recipes). Drift between this doc and the source
-tables is caught by `mdev viewdoc --check` (`support/devtools/mdevlib/viewdoc.py`).
+tables is caught by `mdev viewdoc --check`.
 
 ## 1. Lexical elements
 

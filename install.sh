@@ -20,11 +20,16 @@ mkdir -p "$bindir" "$libdir" "$(dirname "$config")"
 
 # Never clobber silently: an existing file that differs is backed up first.
 # Shims carry a default MOVIAN_SDK_LIB; rewrite it so a non-default --libdir
-# install produces a shim that actually finds its own resolver.
+# install produces a shim that actually finds its own resolver. MOVIAN_SDK_ROOT
+# is stamped the same way: `mdev viewdoc` validates docs that live in this
+# checkout, so the installed shim has to remember where the checkout is. It is
+# recorded, never searched for — same contract as the core locator.
 install_file() {
   local src="$1" dst="$2" tmp
   tmp="$(mktemp)"
-  sed "s|^MOVIAN_SDK_LIB=.*|MOVIAN_SDK_LIB=\"\${MOVIAN_SDK_LIB:-$libdir}\"|" "$src" > "$tmp"
+  sed -e "s|^MOVIAN_SDK_LIB=.*|MOVIAN_SDK_LIB=\"\${MOVIAN_SDK_LIB:-$libdir}\"|" \
+      -e "s|^MOVIAN_SDK_ROOT=.*|MOVIAN_SDK_ROOT=\"\${MOVIAN_SDK_ROOT:-$here}\"|" \
+      "$src" > "$tmp"
   if [ -e "$dst" ] && ! cmp -s "$tmp" "$dst"; then
     local bak="$dst.bak-$(date +%Y%m%d%H%M%S)"
     cp -p "$dst" "$bak"
@@ -37,6 +42,7 @@ install_file() {
 
 echo "Installing Movian SDK shims:"
 install_file "$here/lib/locate.sh" "$libdir/locate.sh"
+install_file "$here/lib/viewdoc.py" "$libdir/viewdoc.py"
 install_file "$here/bin/mdev" "$bindir/mdev"
 install_file "$here/bin/movian-lsp" "$bindir/movian-lsp"
 

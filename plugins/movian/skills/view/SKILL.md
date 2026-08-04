@@ -28,7 +28,12 @@ a path into the core checkout is needed, `$(mdev core)` supplies it.
   data binding, debug moves.
 
 `mdev viewdoc --check` diffs those reference docs against the core's C source
-tables and exits nonzero on drift.
+tables and exits nonzero on drift. It compares names only, in both directions:
+an attribute or expression function present in the core but undocumented here
+(`missing-from-doc`), and one documented here that this core does not implement
+(`gone-from-source`). The core side comes from `generated/movian-metadata.json`,
+so run the core's `support/devtools/metadata/gen.py --check` first before
+reading `gone-from-source` as a doc bug — a stale artifact looks the same.
 
 ## The edit/reload loop
 

@@ -4,6 +4,7 @@
 set -euo pipefail
 
 MOVIAN_SDK_LIB="${MOVIAN_SDK_LIB:-$HOME/.local/lib/movian-sdk}"  # rewritten by install.sh
+MOVIAN_SDK_ROOT="${MOVIAN_SDK_ROOT:-}"                           # rewritten by install.sh
 . "$MOVIAN_SDK_LIB/locate.sh"
 
 # `mdev core` prints the resolved core root and nothing else, so docs and scripts
@@ -48,6 +49,31 @@ if [ "${1:-}" = "types" ]; then
   echo "$out -> $src ($mode)"
   echo "note: gitignore it unless you deliberately vendor a snapshot."
   exit 0
+fi
+
+# `mdev viewdoc` is answered HERE because the canon split moved its inputs. The
+# GLW reference docs it validates are this plugin's (movian:view), while the
+# artifact it validates them against is the core's. Keeping the checker beside
+# the docs means the dependency runs SDK -> core only; the core carries no
+# knowledge of where the docs went (movian-plugin-sdk#18, was movian#88/#98).
+if [ "${1:-}" = "viewdoc" ]; then
+  shift
+  movian_sdk_locate || exit 1
+  if [ -z "$MOVIAN_SDK_ROOT" ]; then
+    echo "mdev viewdoc: SDK root unknown — this shim was not installed by install.sh." >&2
+    echo "  fix: re-run ./install.sh from the movian-plugin-sdk checkout," >&2
+    echo "       or set MOVIAN_SDK_ROOT to it for this session." >&2
+    exit 2
+  fi
+  refs="$MOVIAN_SDK_ROOT/plugins/movian/skills/view/references"
+  if [ ! -d "$refs" ]; then
+    echo "mdev viewdoc: '$MOVIAN_SDK_ROOT' is not a movian-plugin-sdk checkout ($refs missing)." >&2
+    echo "  fix: correct MOVIAN_SDK_ROOT, or re-run install.sh from the checkout." >&2
+    exit 2
+  fi
+  exec python3 "$MOVIAN_SDK_LIB/viewdoc.py" \
+    --metadata "$MOVIAN_SDK_CORE/generated/movian-metadata.json" \
+    --refs "$refs" "$@"
 fi
 
 # `mdev doctor` is answered HERE, not by the core: the locator facts (which core,
