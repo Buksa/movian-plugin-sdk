@@ -90,7 +90,9 @@ Each row was checked across all nine checkouts. [MEASURED]
 ### 2.1 `control.uriprefixes` — the only plugin that is reachable from a URL
 
 [READ] `movian-plugin-youtube/plugin.json:14-22` declares seven URI prefixes.
-**Zero of the other eight plugins have a `control` block at all.** [CORE]
+**No other plugin in the corpus declares a single URI prefix.** Seven have no
+`control` block at all; m7-jellyfin has `"control": {}` — empty — in its
+`package.json` `movian` key. [CORE]
 `src/plugins.c:2211-2221` feeds that list to `autoplugin_create()` /
 `autoplugin_trigger_add_prefix()` — the on-demand plugin-install trigger. It pairs
 with the six raw-URL routes at `youtube.js:301-306` and the four playlist routes at
@@ -349,11 +351,17 @@ neither is wrong. But the consequences differ:
   around a blocking call (`src/index.js:152`, `:179`).
 
 **What the outsider got right that the author did not:** reading the manifest as
-the single source of identity (`src/index.js:10-19`), and — uniquely in the
-corpus — keeping the manifest itself in `package.json` under a `movian` key and
-generating `plugin.json` from it at build time (`movian-soap4.me/package.json`,
-`gulpfile.babel.js`). Its i18n table lives there too. That is a better idea than
-anything in youtube.
+the single source of identity (`src/index.js:10-19`), and keeping the manifest itself in
+`package.json` under a `movian` key, generating `plugin.json` from it at build
+time (`movian-soap4.me/package.json`, `gulpfile.babel.js`). Its i18n table lives
+there too. That is a better idea than anything in youtube.
+
+**Correction to my own first draft, and to the map:** this is *not* unique.
+[READ] `m7-jellyfin/package.json` carries the same `movian` key and commits no
+`plugin.json` either — as
+[#20](https://github.com/Buksa/movian-plugin-sdk/issues/20) established
+independently. Two of the three build-using plugins converged on it with no
+contact. That strengthens the recommendation rather than weakening it.
 
 **What first contact cost him**, both citable:
 - `src/index.js:380` redirects to `routes.LOGIN2`, which does not exist in the
