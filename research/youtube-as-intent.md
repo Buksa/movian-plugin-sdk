@@ -315,7 +315,7 @@ intended use requires more than ES5.1.
 | idiom | youtube | community | verdict |
 |---|---|---|---|
 | sync inspector verdict | `return 0` (`youtube.js:50`) | `proceed()` (no-op) | **youtube = design** ([CORE] `es_io.c:796-801`) |
-| page-level image | `metadata.icon` (`youtube.js:109`, `:127`, `:222`) | `metadata.logo` (soap4.me `:156`, tmdb `:1504`, HDRezka `pages/player.js:50`, anilibria `lib/ui.js:46`) | **youtube = design**; `logo` has **zero** consumers in the core (§6.1) |
+| page-level image | `metadata.icon` (`youtube.js:109`, `:127`, `:222`) | `metadata.logo` (soap4.me `:156`, tmdb `:1504`, HDRezka `pages/player.js:50`, anilibria `lib/ui.js:46`) | **youtube = design** for what RENDERS; `logo` is not inert — see the correction in §6.1 |
 | HTTP cache | `caching: true` (`api.js:174`) | `cacheTime: N` (HDRezka 12×, m7 3×, anilibria 3×) | **both correct** — [CORE] `es_io.c:313-314`, `cacheTime` merely implies `caching` |
 | pagination | `asyncPaginator` + explicit `page.haveMore()` (`browse.js:270`, `:275`, `:308`) | `paginator` (qobuz, tmdb, m7, dailymotion, HDRezka) | **both are real APIs**; [CORE] `page.js:208-225` — `asyncPaginator` short-circuits and the plugin owns `haveMore`, `paginator`'s return value sets it |
 | module load timing | `require()` inside route handlers, 18 sites | top-of-file (soap4.me, tmdb, dailymotion: 0 deferred) | **youtube = design, and it says why**: `youtube.js:8-9` "*keep the main youtube.js file small for faster loading on slower devices*". HDRezka (63) and trakt (7) converged on it independently |
@@ -367,7 +367,7 @@ contact. That strengthens the recommendation rather than weakening it.
 - `src/index.js:380` redirects to `routes.LOGIN2`, which does not exist in the
   `routes` object (`src/index.js:54-62`). `page.redirect(undefined)` on the
   auth-rejected path.
-- `page.metadata.logo` (`:156`, `:210`, `:246`) is inert (§6.1).
+- `page.metadata.logo` (`:156`, `:210`, `:246`) is not read by any skin, but it is not inert — see the correction in §6.1.
 
 Together the two plugins bracket the range exactly as the ticket predicted: the
 author reaches for asynchrony, the core's cache, pagination, the prop tree and the
@@ -381,7 +381,22 @@ read.
 
 ### 6.1 Two properties the corpus writes that the core never reads
 
-- **`page.metadata.logo`** — [CORE] **zero** occurrences in `glwskins/` or `src/`.
+- **`page.metadata.logo`** — **CORRECTED 2026-08-06, this claim was wrong.**
+  It has **zero** occurrences in `glwskins/`, which is true and is why nothing
+  renders from it. But it is read in `src/`: `src/navigator.c:706-712` subscribes to
+  `page/model/metadata/logo` and routes it to `nav_page_icon_set` — the icon a
+  **bookmark** carries. The block sits under `#if ENABLE_BOOKMARKS`
+  (`navigator.c:685`), and `build.debug/config.h:21` defines `ENABLE_BOOKMARKS 1`,
+  so it is compiled and live.
+
+  The core's own naming is what hides this: the subscription is `np_icon_sub` and
+  the callback `nav_page_icon_set`, while the property they watch is `logo`.
+
+  So `icon` and `logo` are two consumers for two purposes, not one real and one
+  dead. The original claim came from grepping `.c` and `.view` for a rendering
+  consumer and concluding absence — without checking conditional compilation. The
+  same failure mode this project logged twice today under
+  [[typecheck-is-not-execution]]: absence found by one search is not absence.
   `metadata.icon` is real (`glwskins/flat/theme.view:167`,
   `glwskins/flat/items/list/audio.view:38-39`,
   `glwskins/flat/items/rect/video.view:17`). Four plugins write `logo`; the author
@@ -461,8 +476,10 @@ Ranked by strength of evidence.
    inspector, gate on `ctrl.authFailed`, resume with `proceed()`. Cite
    `api.js:12-154`. Note that the one plugin that copied the popup dropped the
    mechanism.
-4. **`page.metadata.icon`, never `logo`.** Cite [CORE] `theme.view:167` and the
-   absence of `logo`. Four plugins are currently wrong.
+4. **`page.metadata.icon` is what RENDERS; `logo` feeds bookmarks.** Cite [CORE]
+   `theme.view:167` for the first and `navigator.c:706-712` for the second. The four
+   plugins writing `logo` are not wrong — they are setting a different thing. Whether
+   they MEANT to is a separate question the canon should ask.
 5. **`subtype` is a Material icon name.** Cite `youtube.js:234`, `browse.js:211`,
    [CORE] `glwskins/flat/items/list/default.view:19-20` and the icon files.
 6. **Options belong to the page, not to a global settings screen** — at least by
