@@ -1,6 +1,11 @@
 ---
 name: authoring
-description: How a Movian plugin is written — the idioms, dialect and mechanism choices that no artifact carries. Use before writing or changing plugin JS: the entry point and its scope, service and route registration, page items and metadata, pagination, search, HTTP and caching, settings. What the API *is* comes from movian:api and the generated .d.ts; this is what to do with it.
+description: >-
+  How a Movian plugin is written — the idioms, dialect and mechanism choices that no
+  artifact carries. Use before writing or changing plugin JS — the entry point and its
+  scope, service and route registration, page items and metadata, pagination, search,
+  HTTP and caching, settings. What the API *is* comes from movian:api and the generated
+  .d.ts; this is what to do with it.
 ---
 
 # Authoring a Movian plugin
@@ -282,13 +287,32 @@ schema and no validation** — an unread key is silently inert.
 
 ## What actually renders, and clearing the spinner
 
-`[CORE]` `page.type` selects `glwskins/flat/pages/<type>.view`; each item's `type`
-selects `glwskins/flat/items/list/<type>.view`, falling back to `default.view`. **The
-default item view draws exactly two things** — `default.view:17` `metadata.icon` and
-`:40` `metadata.title`. Everything else in your metadata object is inert until you name
-an item type whose view reads it, or ship your own `.view`. Fold the author, the year or
-the rating into the title string if you want them on a stock list. An item with no
-`metadata.icon` draws a placeholder glyph, not nothing.
+**Which item views apply depends on `page.model.contents`, and there are two sets.**
+`[CORE]` `directory.view:58` maps `contents` to a page view, and each page view picks a
+different item directory:
+
+| `contents` | page view | item views |
+|---|---|---|
+| unset, most values | `list.view:33` | `items/list/<type>.view` → `list/default.view` |
+| `grid`, `images` | `grid.view:34` | `items/rect/<type>.view` → `rect/default.view` |
+| `searchresults` | `searchresults.view:36` | `items/rect/…` |
+
+`items/list/` has 18 views — `separator`, `info`, `video`, `audio`, `image`, `person`,
+`event`, `tvchannel`, `tvepisode`, `action`, `station`, `plugin`, `location`, `network`,
+`font`, `add`, `search`, `default`. **`items/rect/` has 8** — `audio`, `image`, `plugin`,
+`search`, `separator`, `station`, `video`, `default`. So on a grid page most types you
+can name fall through to `rect/default.view`, including `info`.
+
+The two defaults do not draw the same things either: `list/default.view` reads
+`metadata.icon` and `metadata.title`; `rect/default.view` reads `metadata.backdrop`,
+`metadata.icon` and `metadata.title`. Everything else in your metadata object is inert
+until you name a type whose view reads it, or ship your own `.view`. Fold the author, the
+year or the rating into the title string if you want them on a stock list. An item with
+no `metadata.icon` draws a placeholder glyph, not nothing.
+
+**Check the pair you are actually rendering.** A plugin whose landing page is a grid and
+whose detail page is a list is using both sets at once — which is easy to write without
+noticing.
 
 **Set `page.loading = false` when your data arrives.** Nothing does it for you on an
 async page, and the page spins forever otherwise. `page.error(msg)` clears it as a side
@@ -297,12 +321,9 @@ effect, which is why an error path can look like it works while the success path
 `page.entries` is what the search-results header counts ("20 hits"). Set it to the
 result total when you know it.
 
-**Pick the item type from the views that exist**, `[CORE]` `glwskins/flat/items/list/`:
-`separator` (renders `metadata.title` as a heading), `info`, `video`, `audio`, `image`,
-`person`, `event`, `tvchannel`, `tvepisode`, `action`, `station`, `plugin`, `location`,
-`network`, `font`, `add`, `search`, `default`. An unknown type falls back to
-`default.view` — which is why `appendPassiveItem('label', …)` works for HDRezka and
-qobuz despite there being no `label.view`.
+An unknown type falls back to `default.view` — which is why
+`appendPassiveItem('label', …)` works for HDRezka and qobuz despite there being no
+`label.view` in either set.
 
 **`string`, `bool`, `integer` and `multiopt` are settings widgets, not text.**
 `string.view` is a focusable text *input* bound to `$self.value`. Passing prose to it
@@ -371,7 +392,7 @@ workaround for core behaviour, not a design — but every serious plugin needs i
 
 ## Search — three mechanisms
 
-1. **An item of type `'search'` on your own page**, plus your own `:search:(.*)` route.
+1. **An item of type `'search'` on your own page**, plus your own `:search:(.+)$` route.
    `[CORE]` `glwskins/flat/items/list/search.view` renders an inline search box that
    navigates to `<url><query>` on Enter.
 2. **`new page.Searcher(title, iconPath, callback)`** — a global hook contributing one
@@ -434,6 +455,13 @@ blocks the Duktape context; m7-jellyfin and soap4.me block on every page load.
 Without it an API's own error body is unreachable, and the message you show the user
 becomes "HTTP 400".
 
+**401 is the one status that has not always honoured it.** In this core it does —
+`fa_http.c:3206-3211` returns the body when `FA_CONTENT_ON_ERROR` is set, ahead of the
+authentication path. On older cores 401 went to `authenticate()` regardless, which is
+what qobuz's `lib/qobuz.js:85-90` records. Either way, a 401 is a signal to fix
+credentials in an inspector, not something to parse out of a body — and note that
+`noAuth` skips your inspectors along with the auth.
+
 **3. Then check `statuscode` — and exempt `0` *and* `304`.** `[CORE]` A cache hit does
 not arrive as 200, and it arrives two different ways:
 
@@ -447,10 +475,14 @@ not arrive as 200, and it arrives two different ways:
   `es_io.c:243` passes straight through as `res.statuscode`. So you get a complete,
   correct body under a status every naive check rejects.
 
+Accept the endpoint's whole success contract, not just 200 — a POST that answers 201 or
+a ranged request that answers 206 is not a failure:
+
 ```js
 if(err) return cb(err);
-if(res.statuscode !== 200 && res.statuscode !== 0 && res.statuscode !== 304)
-  return cb('HTTP ' + res.statuscode);
+var ok = (res.statuscode >= 200 && res.statuscode < 300) ||
+         res.statuscode === 0 || res.statuscode === 304;
+if(!ok) return cb('HTTP ' + res.statuscode);
 ```
 
 The 304 case is not theoretical. A plugin that exempts only `0` works on first run and
@@ -485,7 +517,18 @@ opts.cacheTime = CACHE_CATALOG;   // named per-endpoint TTLs, e.g. 120
 
 **6. A cached 200 is not a valid 200.** `[CORE]` `fileaccess.c:1742` stores anything
 under 300, including anti-bot interstitials and login walls. If your source can serve
-those, validate the *body* and re-issue with `caching: false` on failure.
+those, validate the *body* and re-issue bypassing the cache.
+
+**Bypassing means deleting `cacheTime`, not setting `caching: false`.** `[CORE]`
+`es_io.c:314` is `ehr_cache = es_prop_is_true("caching") || ehr_min_expire` — a non-zero
+`cacheTime` turns caching back on by itself, so a retry that flips only `caching` is
+served the same poisoned entry:
+
+```js
+var retry = {};                       // or clone opts and then:
+delete retry.cacheTime;
+retry.caching = false;
+```
 
 **7. The API cache caches bytes, not meaning.** It only caches GET with no body
 (`es_io.c:163-166`), so POST results are structurally uncacheable, and a hit still costs
@@ -549,10 +592,15 @@ This corpus has produced wrong findings repeatedly, always the same two ways.
 - **A claim of absence names its search surface and what it could not have seen.**
   `page.metadata.logo` was declared to have no consumer by a search over `glwskins/` and
   rendering code — it is read in `navigator.c` under `#if ENABLE_BOOKMARKS`.
-- Plain `grep -r` under-reports on these repos. Use
-  `find <repo> -prune-noise -print0 | xargs -0 grep -n`, and exclude `build*/`, `dist/`,
-  `releases/`, `node_modules/` and `tests/` explicitly or an author's intent gets counted
-  twice out of a bundle.
+- Plain `grep -r` under-reports on these repos — it returned nothing for a plugin that a
+  `find`-driven traversal found two hits in. Use a real exclusion expression, or an
+  author's intent gets counted twice out of a bundle:
+
+  ```sh
+  find <repo> \( -name node_modules -o -name .git -o -name .codegraph \
+    -o -name dist -o -name 'build*' -o -name releases -o -name tests \) -prune \
+    -o -type f \( -name '*.js' -o -name '*.ts' \) -print0 | xargs -0 grep -n '<pattern>'
+  ```
 - **Before "N plugins agree", check whether the N share a lineage.** `[COPIED]`
 
 Use codegraph before grep; all nine plugins are indexed.
@@ -574,9 +622,21 @@ doc.root.getElementsByTagName('a')[0].getAttribute('href');   // silent
 ```
 
 A method returning an **array** of a known shape is emitted as `any`, so everything
-reached through its elements is unchecked. Core issue #179. Until it closes, assign the
-element to a local and let the declaration you *do* have carry it, or check that call by
-running it.
+reached through its elements is unchecked. Core issue #179.
+
+Assigning the element to a plain local does **not** fix it — a local inferred from an
+`any` expression is itself `any`. The annotation is what restores checking:
+
+```js
+var el = doc.root.getElementsByTagName('a')[0];
+el.getAttribte('href');            // silent
+
+/** @type {import('movian/html').Node} */
+var el2 = doc.root.getElementsByTagName('a')[0];
+el2.getAttribte('href');           // TS2339
+```
+
+Annotate, or check that call by running it.
 
 ## What this skill does not cover
 
