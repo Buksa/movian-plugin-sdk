@@ -279,11 +279,25 @@ schema and no validation** — an unread key is silently inert.
   tmdb writes only the inert one; m7-jellyfin and soap4.me write **both, with different
   values** on the same page (`model.contents = 'grid'` beside `contents = 'list'`).
   Values the core itself sets: `grid`, `plugins`, `searchresults`.
-- **Watched state.** `[CORE]` `page.js:273-293` auto-binds play info only for
-  `type === 'video'` with a parseable `videoparams:` URL. If your item URLs are plugin
-  URLs, that binding keys on a URL that changes when your payload format does. HDRezka
-  is the only plugin that noticed, and rebinds by hand against a stable synthetic
-  canonical URL (`utils/ui.js:27-33`).
+- **Watched state binds for every `'video'` item, whether you want it or not.** `[CORE]`
+  `page.js:275` sets `metabind_url = url` and `:292` calls `bindPlayInfo(root,
+  metabind_url)` **unconditionally** for `type === 'video'`. The `videoparams:` branch at
+  `:276-291` only *refines* the key from `canonicalUrl` or the first source. So an item
+  whose URL is your own plugin route gets watched state and resume keyed on **that
+  route** — which breaks the moment your payload format changes.
+
+  **Binding a second time does not replace the first.** `[CORE]`
+  `playinfo.c:252-289` allocates a fresh record, takes the same `playcount` /
+  `lastplayed` / `restartpos` props via `prop_create_r`, and `LIST_INSERT_HEAD`s it — it
+  never looks for an existing binding on that prop. Worse, its `mip_set` writes with
+  `prop_set_int_ex(…, mip_playcount_sub, …)` (`:158`), which excludes only *its own*
+  subscription: the first binding's callback still fires and writes the new value into
+  the **old** URL's kvstore row (`:241-243`).
+
+  So if you need a stable key, give the item a URL you control the shape of, or accept
+  two live bindings. HDRezka is the only plugin that noticed the instability and adds a
+  synthetic canonical binding (`utils/ui.js:27-33`, called from `pages/catalog.js:161`
+  right after appending a `'video'` item) — which leaves it with both.
 
 ## What actually renders, and clearing the spinner
 
