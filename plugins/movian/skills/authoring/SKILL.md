@@ -35,7 +35,7 @@ Duktape has no `let`/`const`, no arrow functions, no template literals, no `clas
 `Promise`, no `Object.entries`.
 
 - Take types from the generated `.d.ts` with `"noEmit": true`. Three plugins already do
-  exactly that; it is not a build step. The working config, verified:
+  exactly that; it is not a build step. The working config:
 
   ```json
   {
@@ -51,6 +51,30 @@ Duktape has no `let`/`const`, no arrow functions, no template literals, no `clas
   reports nothing — which reads exactly like a clean pass.
   `require('movian/page')` resolves to the declared module in the entry file as well as
   in `require`d ones, so the entry is checked too.
+
+### Check the artifact before you trust it
+
+**Everything this skill says about type checking depends on the core your `.d.ts` came
+from, and a checkout can be months behind without saying so.** Two things arrived in the
+core during 2026-08 that the typing rules here require:
+
+```sh
+grep -c 'interface Page'   "$(mdev core)/generated/movian-api.d.ts"   # need 1
+grep -c 'declare const Plugin' "$(mdev core)/generated/movian-api.d.ts"   # need 1
+```
+
+- **No `interface Page`** → `movian/page` exports only `Route` and `Searcher` as
+  `new(…): any`, so the handler parameter is `any`, the JSDoc `import(…).Page` form
+  fails with TS2694, and **no invented member is caught anywhere**.
+- **No `declare const Plugin`** → the config above reports TS2304 on `Plugin`,
+  `console` and `setTimeout` before you have written anything unusual.
+
+If either is missing, regenerate (`support/devtools/metadata/gen.py`) or pull the core.
+Measured the hard way: a from-scratch author on a checkout four merges behind had to
+hand-transcribe `Page` and `Item` out of `res/ecmascript/modules/movian/page.js` to get
+any checking at all, and the clean `tsc` run before that was **vacuous**. Mutation-test
+your own gate — write `page.searchable = true` and confirm it reddens — before believing
+a green one.
 - **A compiler that emits ES5 accepts ES6 in silence.** `tsc --target ES5` downlevels a
   template literal instead of rejecting it, so the check goes green and Duktape throws
   `SyntaxError: invalid token` at load. That is the mechanism that hid a real dialect
@@ -107,12 +131,24 @@ service.create(manifest.title, PREFIX + ':start', 'video', true, LOGO);
 ```
 
 `[9/9]` — identical five arguments, identical `:start` URL convention, exactly one
-service per plugin, `enabled` truthy. `[CORE]` `service.c:116-124`: `enabled` truthy is
-what puts it in `$global.services.enabled`, which is the home screen. There is no second
-mechanism and no separate "register on home" call.
+service per plugin, `enabled` truthy. `[CORE]` `service.c:116-124` filters on `enabled`,
+and that is the only gate — there is no separate "register on home" call.
+
+**The home screen clones `$core.services.stable`, not `.enabled`.** `[CORE]`
+`glwskins/flat/pages/home.view:111`. `stable` is a `prop_reorder` over the same
+enabled-filtered set (`service.c:126-138`), so the rule is unchanged — but debugging the
+home screen against `services/enabled` inspects the wrong node.
+
+**Always pass a real `icon`, because `type` doubles as an icon key.** `[CORE]`
+`home.view:129-140` falls back to `"skin://icons/" + translate($self.type, …)` when
+`$self.icon` is unset, and its table covers only `tv`, `usb`, `cd`, `dvd`, `bluray`,
+`network`, `setting`, `storage`, `plugin`, `movian` — **`video` and `music` are not in
+it**, so the two types the whole corpus uses would render as a generic folder. All nine
+pass an icon, which is why nobody has noticed.
 
 `type` is `'video'` for eight of nine; qobuz uses `'music'`. dailymotion and soap4.me
-read it from the manifest's `category` — a good idea, `[2/9]`.
+read it from the manifest's `category` — `[2/9]`, and it inherits the hazard above:
+`category: "other"` is in no icon table either.
 
 ## Routes
 
@@ -154,6 +190,15 @@ URL. Present in m7-jellyfin (`src/view.js:32-39`) and dailymotion
    a longer sibling. `[1/9]` soap4.me is the only plugin that does this, and it is right.
 2. End-anchor with `$` where the URL is complete.
 3. Register the most specific pattern first.
+
+**Exception: the search route takes everything.** `[CORE]` The search bar concatenates
+raw — `theme.view:227` is `navOpen(URLPREFIX + $view.searchQuery)`, no escaping — and
+captures reach the handler **undecoded**: `es_route.c:236-240` pushes the raw byte range.
+So a query arrives with its spaces, colons, parens and non-ASCII intact. Write
+`:search:(.+)$` and decode nothing; `([^:]+)` there silently truncates every multi-word
+query and every `subject:x` link you emit yourself. Only dailymotion runs
+`decodeURIComponent` on a capture, and it does so only on its own route — its Searcher
+path passes the query through undecoded, so the two disagree.
 
 ### Keep pattern and handler together
 
@@ -235,6 +280,49 @@ schema and no validation** — an unread key is silently inert.
   is the only plugin that noticed, and rebinds by hand against a stable synthetic
   canonical URL (`utils/ui.js:27-33`).
 
+## What actually renders, and clearing the spinner
+
+`[CORE]` `page.type` selects `glwskins/flat/pages/<type>.view`; each item's `type`
+selects `glwskins/flat/items/list/<type>.view`, falling back to `default.view`. **The
+default item view draws exactly two things** — `default.view:17` `metadata.icon` and
+`:40` `metadata.title`. Everything else in your metadata object is inert until you name
+an item type whose view reads it, or ship your own `.view`. Fold the author, the year or
+the rating into the title string if you want them on a stock list. An item with no
+`metadata.icon` draws a placeholder glyph, not nothing.
+
+**Set `page.loading = false` when your data arrives.** Nothing does it for you on an
+async page, and the page spins forever otherwise. `page.error(msg)` clears it as a side
+effect, which is why an error path can look like it works while the success path hangs.
+
+`page.entries` is what the search-results header counts ("20 hits"). Set it to the
+result total when you know it.
+
+**Pick the item type from the views that exist**, `[CORE]` `glwskins/flat/items/list/`:
+`separator` (renders `metadata.title` as a heading), `info`, `video`, `audio`, `image`,
+`person`, `event`, `tvchannel`, `tvepisode`, `action`, `station`, `plugin`, `location`,
+`network`, `font`, `add`, `search`, `default`. An unknown type falls back to
+`default.view` — which is why `appendPassiveItem('label', …)` works for HDRezka and
+qobuz despite there being no `label.view`.
+
+**`string`, `bool`, `integer` and `multiopt` are settings widgets, not text.**
+`string.view` is a focusable text *input* bound to `$self.value`. Passing prose to it
+gives the user an edit box.
+
+**Detail pages: `appendPassiveItem` does not put your text where a view reads it.**
+`[CORE]` `page.js:320-331` writes the second argument to `root.data`, while
+`items/list/info.view:10` renders `$self.description` — a top-level item prop that no
+`appendPassiveItem` argument reaches. Assign it through the returned item:
+
+```js
+var it = page.appendPassiveItem('info', '', {icon: cover});
+it.root.description = synopsis;
+```
+
+`[7/9]` use `appendPassiveItem`, but almost entirely for `separator` and for
+icon+title rows through the `default` fallback. The three plugins with rich detail pages
+(HDRezka, tmdb, trakt — the only three shipping `.view` files) bypass all of this and set
+`page.metadata.glwview` instead.
+
 ## Pagination
 
 **`paginator` and `asyncPaginator` are not two spellings of one idea.** `[CORE]`
@@ -270,6 +358,10 @@ monotonic cancellation token, and a watchdog that releases the mutex if the fetc
 (HDRezka `pages/catalog.js:26-27,68-69,115-126`; anilibria `lib/pagination.js:44-45,71-88`).
 Prefer extracting that loop into a module with an injectable scheduler — `[COPIED]`, one
 author, but it is the only shape in the corpus that is unit-testable.
+
+`setTimeout` / `clearTimeout` / `setInterval` / `clearInterval` are globals `[CORE]`
+`es_timer.c:239-241` — no `require`. They are the only timing primitive you get, and
+both the watchdog and the delay below need them.
 
 **Delay `haveMore(true)`.** `[2/9 independent]` GLW cloners request more children
 immediately when `haveMore(true)` is set while every card is on screen, so a fast (or
@@ -309,6 +401,31 @@ If you also register a Searcher:
 The wrapper is thin; the semantics are in `es_io.c`. `[CORE]` `movian/http.js:93-104`:
 passing a third argument makes the call **async with an error-first callback**
 `function(err, res)`; omitting it makes the call **synchronous and throwing**.
+
+### Building the request, and reading the reply
+
+`[CORE]` The whole recognised `ctrl` vocabulary is `es_io.c:303-410`:
+
+| field | line | effect |
+|---|---|---|
+| `args` | `:394` | **query string**, escaped by the core. An object, or an array of objects merged left to right |
+| `headers` | `:319` | request headers |
+| `postdata` | `:341` | buffer, or object (form-encoded), or string |
+| `method` | `:404` | verb; defaults to GET, or POST when `postdata` is set |
+| `compression` | `:307` | sends `Accept-Encoding: gzip` — `[6/9]`, set it |
+| `noFollow` | `:306` | do not follow redirects (how you read a `Set-Cookie` off a 302) |
+| `verifySSL` | `:310` | verify certificates |
+| `headRequest` | `:312` | HEAD |
+| `noAuth` | `:308` | skip auth — **also skips your inspectors** |
+| `debug` | `:305` | log the exchange |
+
+`args` is what a REST API needs and it is easy to miss: build query strings with it, not
+by string concatenation, or you will escape wrong.
+
+The reply carries `res.statuscode`, `res.buffer`, `res.responseheaders`. **Get the body
+with `res.toString()`** — `movian/http.js`'s `HttpResponse` also offers `bytes`,
+`headers_lc`, `contenttype` and `convertFromEncoding(charset)` for sources that are not
+UTF-8.
 
 **1. Use the async form. Reserve synchronous requests for start-up.** A sync request
 blocks the Duktape context; m7-jellyfin and soap4.me block on every page load.
