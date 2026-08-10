@@ -523,7 +523,9 @@ or `.ts` file of any of the nine, excluding `node_modules/`, `dist/`, `build*/`,
 `releases/` and `tests/`. That search would not have seen a check written as a range
 (`>= 400`, `< 300`), which would handle the case without naming it.
 
-**4. To cache, pass `cacheTime`. Never `caching` alone.** `[CORE]` `es_io.c:414-415`:
+**4. To cache, pass `cacheTime`. Do not rely on `caching` alone.** It is not inert —
+youtube and dailymotion cache successfully with it, because neither sets a request
+header. It is *conditional*, and the conditions are invisible: `[CORE]` `es_io.c:414-415`:
 when `cacheTime` is 0, `caching: true` is silently vetoed by **any** request header whose
 name is not `user-agent` — `Accept` is enough. And even if it survives, `fileaccess.c:1742`
 stores nothing unless the origin permitted it. `cacheTime: N` (`es_io.c:313`) skips the
@@ -531,7 +533,8 @@ veto and forces a minimum lifetime even against `Cache-Control: no-store`
 (`fileaccess.c:1741`).
 
 The naming is backwards from the behaviour: `cacheTime` is the switch, `caching` is a
-request the core may decline. Measured: **two of nine found the working spelling.**
+request the core may decline. Measured: **five of nine set a cache flag at all, and two
+of those found the deterministic spelling.**
 trakt sets `caching: true` four times, comments that it caches, and does not cache —
 three unconditional headers veto it. tmdb tried it and commented it out, probably
 because its `Accept` header made it do nothing.

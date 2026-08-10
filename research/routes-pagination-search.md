@@ -394,7 +394,9 @@ resume position are bound automatically for video items, keyed on the canonical 
 ### 1.7 tmdb — apiversion 1, global `plugin` object, 2858 lines, no `require`
 
 - **[M] It is v1 by omission.** `movian-plugin-tmdb/plugin.json` has no `apiversion`
-  field; `src/plugins.c:688` defaults it to 1, and `src/ecmascript/ecmascript.c:913-919`
+  field; `src/plugins.c:712` defaults it to 1 (**corrected 2026-08-09 from `:688`, which is the
+  identical statement in the `bitcode` branch under `#if ENABLE_VMIR`, not the `ecmascript`
+  one**), and `src/ecmascript/ecmascript.c:913-919`
   loads `res/ecmascript/legacy/api-v1.js` before the plugin when `version == 1`.
 - **[M] The v1 surface is a thin shim over the same API.** `legacy/api-v1.js:104-121`:
   `createService` → `movian/service.create`, `addURI` → `new page.Route(re, callback)`,
@@ -699,6 +701,7 @@ incomplete, it is misleading; the canon should replace it with something shaped 
   redeclaration error; it survives because swc transpiles to `var`. Not in this ticket's
   scope, but it is evidence that the transpile step is load-bearing in ways its author may
   not intend.
-- **`apiversion` defaults to 1, not 2** (`src/plugins.c:688`), and tmdb is v1 purely
+- **`apiversion` defaults to 1, not 2** (`src/plugins.c:712` — the `ecmascript` branch;
+  `:688` is the same line in the VMIR-only `bitcode` branch), and tmdb is v1 purely
   because its manifest omits the field. The v1 `plugin` object is a 40-line shim
   (`legacy/api-v1.js:104-121`) over the identical v2 calls.
