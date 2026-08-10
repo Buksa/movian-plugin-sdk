@@ -1,5 +1,17 @@
 # andoma's youtube plugin, read as a document
 
+> **Point-in-time survey — read the canon, not this, for current rules.**
+> Investigated on the date stated below against the checkouts as they then stood. It is
+> the measurement record behind
+> [`movian:authoring`](../plugins/movian/skills/authoring/SKILL.md), not a substitute for
+> it. Where the two disagree the skill wins: it has been corrected by later measurement
+> and by running the code, and this file is deliberately **not** rewritten to match, so
+> the reasoning that produced a wrong rule stays visible. Known corrections carried by
+> the skill and not by these surveys: a cache hit also arrives as **HTTP 304**, bypassing
+> a poisoned entry needs `cacheTime` **deleted** rather than `caching: false`, the
+> success check should accept the **2xx range**, `noFail` **does** cover 401 on a current
+> core, and route priority has no reachable `INT32_MAX` case.
+
 Research for [issue #23](https://github.com/Buksa/movian-plugin-sdk/issues/23),
 part of the [plugin authoring canon](https://github.com/Buksa/movian-plugin-sdk/issues/19).
 Investigated 2026-08-06.
@@ -317,7 +329,7 @@ intended use requires more than ES5.1.
 | sync inspector verdict | `return 0` (`youtube.js:50`) | `proceed()` (no-op) | **youtube = design** ([CORE] `es_io.c:796-801`) |
 | page-level image | `metadata.icon` (`youtube.js:109`, `:127`, `:222`) | `metadata.logo` (soap4.me `:156`, tmdb `:1504`, HDRezka `pages/player.js:50`, anilibria `lib/ui.js:46`) | **youtube = design** for what RENDERS; `logo` is not inert — see the correction in §6.1 |
 | HTTP cache | `caching: true` (`api.js:174`) | `cacheTime: N` (HDRezka 12×, m7 3×, anilibria 3×) | **both correct** — [CORE] `es_io.c:313-314`, `cacheTime` merely implies `caching` |
-| pagination | `asyncPaginator` + explicit `page.haveMore()` (`browse.js:270`, `:275`, `:308`) | `paginator` (qobuz, tmdb, m7, dailymotion, HDRezka) | **both are real APIs**; [CORE] `page.js:208-225` — `asyncPaginator` short-circuits and the plugin owns `haveMore`, `paginator`'s return value sets it |
+| pagination | `asyncPaginator` + explicit `page.haveMore()` (`browse.js:270`, `:275`, `:308`) | **`asyncPaginator` too** — m7-jellyfin, dailymotion, HDRezka, trakt, anilibria; only **qobuz and tmdb** use the synchronous `paginator` | **not a divergence at all.** Corrected 2026-08-09: this row originally listed m7, dailymotion and HDRezka as `paginator` users, contradicting [#22's survey](https://github.com/Buksa/movian-plugin-sdk/issues/22), which measures 6/9 on `asyncPaginator`. The author's idiom is the majority one. [CORE] `page.js:208-225` — `asyncPaginator` short-circuits and the plugin owns `haveMore`; `paginator`'s return value sets it |
 | module load timing | `require()` inside route handlers, 18 sites | top-of-file (soap4.me, tmdb, dailymotion: 0 deferred) | **youtube = design, and it says why**: `youtube.js:8-9` "*keep the main youtube.js file small for faster loading on slower devices*". HDRezka (63) and trakt (7) converged on it independently |
 | requiring `native/*` | does it, and flags it: `youtube.js:45`, `api.js:4` `// XXX: Bad to require('native/')` | anilibria `lib/api.js:30` does it with a comment explaining there is no wrapper; trakt, m7, qobuz, HDRezka all do it | **workaround, self-declared.** The author calls his own line bad. Any canon rule against `native/*` can cite the author against himself |
 | entry-file scope | relies on it: `PREFIX`/`REGION` are `var` at `youtube.js:41-42` and read from `browse.js:85`, `:289` | modules pass values explicitly | **era-ambiguous, see §7** |

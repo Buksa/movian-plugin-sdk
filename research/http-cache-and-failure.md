@@ -1,5 +1,17 @@
 # HTTP, caching and failure handling across the nine plugins
 
+> **Point-in-time survey — read the canon, not this, for current rules.**
+> Investigated on the date stated below against the checkouts as they then stood. It is
+> the measurement record behind
+> [`movian:authoring`](../plugins/movian/skills/authoring/SKILL.md), not a substitute for
+> it. Where the two disagree the skill wins: it has been corrected by later measurement
+> and by running the code, and this file is deliberately **not** rewritten to match, so
+> the reasoning that produced a wrong rule stays visible. Known corrections carried by
+> the skill and not by these surveys: a cache hit also arrives as **HTTP 304**, bypassing
+> a poisoned entry needs `cacheTime` **deleted** rather than `caching: false`, the
+> success check should accept the **2xx range**, `noFail` **does** cover 401 on a current
+> core, and route priority has no reachable `INT32_MAX` case.
+
 Research for [issue #21](https://github.com/Buksa/movian-plugin-sdk/issues/21),
 part of the authoring-canon map [#19](https://github.com/Buksa/movian-plugin-sdk/issues/19).
 Investigated 2026-08-06.

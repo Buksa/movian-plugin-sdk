@@ -178,10 +178,18 @@ twice throws `"Route %s already exist"`.
 er->er_prio = strcspn(str, "()[]*?+$") ?: INT32_MAX;
 ```
 
-Priority is the byte offset of the **first regex metacharacter**; a pattern with none
-gets `INT32_MAX`. The list is sorted descending and the first match wins
-(`es_route.c:95-98`, `:189-199`). So literal routes always beat pattern routes, and
-among patterns the longer literal prefix wins.
+**Read that line together with the one above it.** `es_route.c:108-114` prepends `^`
+when the pattern lacks one, so the string scored at `:145` always begins with `^` — which
+is **not** in `"()[]*?+$"`. `strcspn` therefore always returns at least 1, always truthy,
+and **the `?: INT32_MAX` fallback is unreachable**. Do not reason from it.
+
+What is left is simple: **priority is the length of the literal prefix** — the offset of
+the first metacharacter, or the whole length when there is none. The list is sorted
+descending and the first match wins (`es_route.c:95-98`, `:189-199`).
+
+So **the longer literal prefix wins, and nothing else matters.** A literal route does not
+automatically outrank a pattern route: `foo:x` scores 6 and loses to
+`foo:catalog:(.*)`, which scores 12.
 
 **This ties for the most common overlapping pair.** `foo:(.*)` and `foo:(.*):bar` both
 stop at the same `(`, so they get equal priority and the winner is insertion order —
@@ -193,8 +201,12 @@ URL. Present in m7-jellyfin (`src/view.js:32-39`) and dailymotion
 
 1. Constrain captures — `([0-9]+)`, `([^:]+)` — never bare `(.*)` in a pattern that has
    a longer sibling. `[1/9]` soap4.me is the only plugin that does this, and it is right.
-2. End-anchor with `$` where the URL is complete.
-3. Register the most specific pattern first.
+2. End-anchor with `$` where the URL is complete — **for matching, never for
+   precedence.** `$` is itself in the metacharacter set, so a trailing one is scanned
+   past nothing and leaves the score unchanged; it can never raise priority. It stops
+   `(.*)` from over-matching, which is the real problem.
+3. Register the most specific pattern first — it is the tiebreak, and after rule 1 there
+   is nothing else left.
 
 **Exception: the search route takes everything.** `[CORE]` The search bar concatenates
 raw — `theme.view:227` is `navOpen(URLPREFIX + $view.searchQuery)`, no escaping — and
@@ -384,9 +396,12 @@ page.asyncPaginator = loader;
 loader();
 ```
 
-`[4/9]` and matched by the `async_page_load` example. Install *before* the first call
-only if the first load should count as pagination; youtube installs it after, so it does
-not.
+`[4/9]` and matched by the `async_page_load` example. **Order decides whether the first
+load counts as pagination.** Assigning `asyncPaginator` and then calling `loader()`, as
+above, means the first batch runs through the same path as every later one. youtube does
+the reverse — loads once, *then* assigns (`browse.js:274-275`) — so its first page is not
+pagination and a re-filter can reset the cursor without racing the paginator. Pick
+deliberately; both appear in the corpus.
 
 **What the example under-teaches, and every real plugin added:** a load mutex, a
 monotonic cancellation token, and a watchdog that releases the mutex if the fetch hangs
@@ -398,7 +413,7 @@ author, but it is the only shape in the corpus that is unit-testable.
 `es_timer.c:239-241` — no `require`. They are the only timing primitive you get, and
 both the watchdog and the delay below need them.
 
-**Delay `haveMore(true)`.** `[2/9 independent]` GLW cloners request more children
+**Delay `haveMore(true)`.** `[2/9]` GLW cloners request more children
 immediately when `haveMore(true)` is set while every card is on screen, so a fast (or
 cached) page triggers runaway pagination. HDRezka waits 1200 ms on the first page and
 50 ms on a cache hit; m7-jellyfin arrived at `setTimeout(…, 125)` separately. This is a
@@ -439,7 +454,8 @@ passing a third argument makes the call **async with an error-first callback**
 
 ### Building the request, and reading the reply
 
-`[CORE]` The whole recognised `ctrl` vocabulary is `es_io.c:303-410`:
+`[CORE]` The fields that *build* the request, all read in `es_io.c:303-410` (the cache
+and failure fields are covered by the rules below):
 
 | field | line | effect |
 |---|---|---|
@@ -465,7 +481,7 @@ UTF-8.
 **1. Use the async form. Reserve synchronous requests for start-up.** A sync request
 blocks the Duktape context; m7-jellyfin and soap4.me block on every page load.
 
-**2. Set `noFail: true`.** `[5/9 independent]` `[CORE]` `es_io.c:309` → `FA_CONTENT_ON_ERROR`.
+**2. Set `noFail: true`.** `[5/9]` `[CORE]` `es_io.c:309` → `FA_CONTENT_ON_ERROR`.
 Without it an API's own error body is unreachable, and the message you show the user
 becomes "HTTP 400".
 
@@ -539,8 +555,9 @@ those, validate the *body* and re-issue bypassing the cache.
 served the same poisoned entry:
 
 ```js
-var retry = {};                       // or clone opts and then:
-delete retry.cacheTime;
+var retry = {};
+for(var k in opts) retry[k] = opts[k];
+delete retry.cacheTime;               // deleting this is what disables the cache
 retry.caching = false;
 ```
 
@@ -553,7 +570,9 @@ eviction is enough.
 **8. Return cache provenance to your callers.** `[2/9]` UI pacing depends on it — see
 the `haveMore` delay above.
 
-**9. Back off on 429.** One plugin in nine does; seven ignore it.
+**9. Back off on 429.** One plugin in nine implements a backoff (trakt, additive on the
+device-code poll); one more names 429 in an error message without backing off (qobuz);
+the remaining seven ignore it.
 
 ### Inspectors — auth, and headers the player needs
 
@@ -617,7 +636,8 @@ This corpus has produced wrong findings repeatedly, always the same two ways.
   ```
 - **Before "N plugins agree", check whether the N share a lineage.** `[COPIED]`
 
-Use codegraph before grep; all nine plugins are indexed.
+Use codegraph before grep — **eight of the nine plugins are indexed; `soap4.me` is not**,
+and must be read directly.
 
 ## Where the type system stops seeing
 
