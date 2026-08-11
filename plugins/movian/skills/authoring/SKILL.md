@@ -219,7 +219,10 @@ new page.Route(PREFIX + ':release:([0-9]+)', function(page, id) { ... });
 `[9/9]` — `new page.Route(pattern, handler)`, and the handler receives
 **`(Page, ...captureGroups)`**. `[CORE]` `page.js:384-406` offers no options object, no
 named parameters and no query-string parsing: positional regex captures are the only
-channel from URL to handler. Only 8 capture slots exist (`es_route.c:171`).
+channel from URL to handler. **Seven** capture groups reach the handler: the array is
+`hts_regmatch_t matches[8]` (`es_route.c:171`, `:191`) but `matches[0]` is the full match,
+and the forwarding loop is `for(int i = 1; i < 8; i++)` (`es_route.c:231`). An eighth
+group is silently dropped, which shifts nothing — the handler simply never sees it.
 
 `[CORE]` A pattern not starting with `^` is silently anchored at the front
 (`es_route.c:109-115`) and **is not anchored at the end**. Registering a pattern string
@@ -544,11 +547,29 @@ Without it an API's own error body is unreachable, and the message you show the 
 becomes "HTTP 400".
 
   *On 401, the one status that has not always honoured `noFail`:* in this core it does —
-  `fa_http.c:3206-3211` returns the body when `FA_CONTENT_ON_ERROR` is set, ahead of the
-  authentication path. On older cores 401 went to `authenticate()` regardless, which is
-  what qobuz's `lib/qobuz.js:85-90` records. Either way, a 401 is a signal to fix
-  credentials in an inspector, not something to parse out of a body — and note that
-  `noAuth` skips your inspectors along with the auth.
+  `fa_http.c:3206-3211` returns the body when `FA_CONTENT_ON_ERROR` is set. On older
+  cores 401 went to `authenticate()` regardless, which is what qobuz's
+  `lib/qobuz.js:85-90` records. Note also that `noAuth` skips your inspectors along with
+  the auth.
+
+> **`noFail: true` and inspector-driven 401 recovery are mutually exclusive. Pick one
+> per request.** `[CORE]` The 401 branch is
+> `if(hra->flags & FA_CONTENT_ON_ERROR && hf->hf_rsize >= 0 && code > 0) break;`
+> (`fa_http.c:3206-3211`) — it returns the body **instead of** falling through to
+> `authenticate()`, and `authenticate()` is what takes the external-inspector path via
+> `hf_ext_auth`. So on any 401 that carries a body — which is every JSON API — `noFail`
+> means your inspector's `ctrl.authFailed` branch **never runs**, and the caller gets a
+> 401 body to parse rather than a refreshed token and a retry.
+>
+> This is live in the corpus, in the plugin that otherwise does auth best: trakt sets
+> `opts.noFail = true` at `src/api.js:74` on the same API calls its `authFailed`
+> inspector at `src/api.js:11-43` is registered to rescue. A 401 with a body short-circuits
+> the inspector it was written for.
+>
+> **So:** omit `noFail` on requests you want the inspector to authenticate, and keep it
+> for the ones where you need the API's error body. A 401 with **no** body still reaches
+> `authenticate()` — `hf_rsize >= 0` is part of the condition — which is why this can look
+> like it works until the API starts returning error JSON.
 
 **3. Then check `statuscode` — and exempt `0` *and* `304`.** `[CORE]` A cache hit does
 not arrive as 200, and it arrives two different ways:
@@ -602,7 +623,7 @@ because its `Accept` header made it do nothing.
 
 ```js
 opts.caching = true;
-opts.cacheTime = CACHE_CATALOG;   // named per-endpoint TTLs, e.g. 120
+opts.cacheTime = CACHE_CATALOG;   // SECONDS, not milliseconds. e.g. 120 = two minutes
 ```
 
 **5. Never cache an authenticated or per-user endpoint.** `[CORE]`
@@ -655,17 +676,27 @@ player opens directly never pass through your `http.request` calls.
 
 | mode | third arg | how you signal |
 |---|---|---|
-| sync | `false` / omitted | **`return 0`** means "I did nothing"; anything else means "handled" (`es_io.c:796-801`) |
+| sync | `false` / omitted | **`return 1`** means "I did nothing"; **`0` or falsy** means "I handled it" (`es_io.c:796-801`, and the function's own contract comment at `:810-812`, *"Return 1 if we didn't do any processing"*) |
 | async | `true` | **`ctrl.proceed()` / `ctrl.fail()`** (`es_io.c:635-645`) |
 
+**The dangerous value is a truthy return after you have modified the request.** If you
+set a header and then `return 1` — or `return true`, or return any object — the core is
+told nothing happened and your change may be discarded. Say `return 0` explicitly.
+
 `proceed()` **does nothing in sync mode.** `[AUTHOR]` youtube is the only plugin that
-uses both modes, and gets both right. trakt gets async right (`src/api.js:43` passes
-`true`, and every branch ends in `ctrl.proceed()` or `ctrl.ignore()`). Two of the three
-sync users — HDRezka (`utils/httpInspector.js:142`, `:222`) and qobuz
-(`lib/inspector.js:71`, `:97`) — call `proceed()` synchronously, where it is a no-op, and
-work only by accident: falling off the end returns `undefined`, which coerces to the same
-verdict as `return 0`. `[COPIED]` — both are the same author's, so this is one mistake
-made twice rather than two plugins agreeing. anilibria (`lib/transport.js:22-34`) calls neither and is
+uses both modes and states the verdict deliberately: `youtube.js:48-51` sets `User-Agent`
+and then `return 0;`. trakt gets async right (`src/api.js:43` passes `true`, and every
+branch ends in `ctrl.proceed()` or `ctrl.ignore()`).
+
+The three sync users all end up signalling correctly, none of them on purpose. HDRezka
+(`utils/httpInspector.js:142`, `:222`) and qobuz (`lib/inspector.js:71`, `:97`) call
+`proceed()`, which is a no-op here, then fall off the end; anilibria
+(`lib/transport.js:22-34`) just falls off the end. In every case the function returns
+`undefined`, which `duk_get_boolean` reads as `0` — "I handled it" — and since all three
+do set headers, that is the right answer. `[COPIED]` HDRezka and qobuz are the same
+author's, so the `proceed()` habit is one decision made twice. **They are one `return`
+statement away from breaking**, and nothing would tell them: the failure would appear as
+headers intermittently not applied. anilibria (`lib/transport.js:22-34`) calls neither and is
 accidentally correct. **No plugin in the corpus signals sync mode deliberately except
 youtube's own `return 0` (`youtube.js:50`).**
 

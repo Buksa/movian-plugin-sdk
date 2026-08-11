@@ -84,9 +84,14 @@ with the **longer literal prefix** wins; (c) two patterns whose literal prefixes
 same length tie, and the winner is decided by insertion order among equals, i.e. by
 `require` order — this is a real hazard, see §1.3 (m7-jellyfin) and §1.8 (dailymotion).
 
-**[M]** Only 8 capture slots exist: `hts_regmatch_t matches[8]` at `es_route.c:171`
+**[M]** Only 8 match slots exist: `hts_regmatch_t matches[8]` at `es_route.c:171`
 and `es_route.c:191`. HDRezka's six-group `ROUTE_PATTERN` (§1.1) is the closest any
 plugin comes to that ceiling.
+
+> **Corrected 2026-08-11.** 8 slots is **7 usable capture groups**, not 8: POSIX
+> `regexec` puts the whole match in `matches[0]`, and the loop that forwards captures to
+> the handler is `for(int i = 1; i < 8; i++)` (`es_route.c:231`). An eighth group is
+> silently not forwarded. HDRezka's six therefore has one slot of headroom, not two.
 
 ### 0.2 `Searcher` — a global hook, not a page member
 
