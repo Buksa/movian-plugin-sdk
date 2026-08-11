@@ -492,12 +492,12 @@ blocks the Duktape context; m7-jellyfin and soap4.me block on every page load.
 Without it an API's own error body is unreachable, and the message you show the user
 becomes "HTTP 400".
 
-**401 is the one status that has not always honoured it.** In this core it does —
-`fa_http.c:3206-3211` returns the body when `FA_CONTENT_ON_ERROR` is set, ahead of the
-authentication path. On older cores 401 went to `authenticate()` regardless, which is
-what qobuz's `lib/qobuz.js:85-90` records. Either way, a 401 is a signal to fix
-credentials in an inspector, not something to parse out of a body — and note that
-`noAuth` skips your inspectors along with the auth.
+  *On 401, the one status that has not always honoured `noFail`:* in this core it does —
+  `fa_http.c:3206-3211` returns the body when `FA_CONTENT_ON_ERROR` is set, ahead of the
+  authentication path. On older cores 401 went to `authenticate()` regardless, which is
+  what qobuz's `lib/qobuz.js:85-90` records. Either way, a 401 is a signal to fix
+  credentials in an inspector, not something to parse out of a body — and note that
+  `noAuth` skips your inspectors along with the auth.
 
 **3. Then check `statuscode` — and exempt `0` *and* `304`.** `[CORE]` A cache hit does
 not arrive as 200, and it arrives two different ways:

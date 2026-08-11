@@ -70,6 +70,16 @@ metacharacters gets `INT32_MAX`. **[M]** `es_route.c:95-98` sorts descending
 `es_route.c:189-199` (`ecmascript_openuri`) walks the list in order and takes the
 **first** regex that matches.
 
+> **Superseded 2026-08-10 — the `INT32_MAX` sentence above and consequence (a) below
+> are both wrong.** `es_route.c:109-114` prepends `^` to any pattern that lacks one,
+> **before** `:145` computes the priority. `^` is not in `"()[]*?+$"`, so `strcspn`
+> always returns at least 1, the `?: INT32_MAX` fallback is **unreachable**, and no
+> route ever gets `INT32_MAX`. Priority is simply the length of the literal prefix, so
+> a literal route does **not** always beat a pattern route: `foo:x` scores 6 and loses
+> to `foo:catalog:(.*)` at 12. Consequences (b) and (c) survive unchanged. The canon
+> carries the corrected rule; this paragraph is left in place as the record of how the
+> wrong one was reached.
+
 **[I]** Consequences, all falsifiable by ordering experiment: (a) literal routes always
 beat pattern routes regardless of registration order; (b) among pattern routes the one
 with the **longer literal prefix** wins; (c) two patterns whose literal prefixes are the
@@ -519,7 +529,7 @@ resume position are bound automatically for video items, keyed on the canonical 
 
 | plugin | route form | args | pagination | search | service `type` |
 |---|---|---|---|---|---|
-| HDRezka | 17 × inline `new page.Route` in `init()` | shared 6-group `ROUTE_PATTERN` + opaque payload | `asyncPaginator` + delay/token/watchdog | Searcher **and** own route | `video` |
+| HDRezka | 16 × inline `new page.Route` in `init()` | shared 6-group `ROUTE_PATTERN` + opaque payload | `asyncPaginator` + delay/token/watchdog | Searcher **and** own route | `video` |
 | trakt | 40 × inline, one file | positional, ≤4 | `asyncPaginator`, reassigned to API thunk | own route + `'search'` item | `video` |
 | m7-jellyfin | table `{path, view}` + `forEach` | positional, `.bind(this)` | `asyncPaginator`, offset/total, `setTimeout(125)` | own route + `'search'` item | `video` |
 | anilibria | 4 × inline | 1 positional | `asyncPaginator` via `lib/pagination.js` module | Searcher only (no `new`) | `video` |
