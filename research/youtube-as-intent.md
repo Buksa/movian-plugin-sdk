@@ -121,13 +121,23 @@ worked without them.
 
 ### 2.2 Async HTTP inspectors, and the correct sync protocol
 
-[READ] `api.js:154` passes `true` as the third argument to
-`io.httpInspectorCreate`. **No other plugin in the corpus passes `true`** — qobuz
-(`lib/inspector.js:68`, `:74`), HDRezka (`utils/httpInspector.js:215`, `:244`) and
-anilibria (`lib/api.js:31`) all pass `false` explicitly.
+> **Corrected 2026-08-10.** Two errors here were wrong *when written*, not merely
+> stale: the claim that no other plugin passes `true` (trakt does), and the claim that
+> anilibria calls `proceed()` in sync mode (it never has — the very lines cited,
+> `lib/api.js:31-44` in the tree surveyed, contain no `proceed` call). A citation
+> pointing at code that contradicts the sentence citing it is the failure this survey
+> should have been proof against. Separately and harmlessly, anilibria was refactored on
+> 2026-08-08 — `lib/api.js` split, and its transport now lives in `lib/transport.js` —
+> so anilibria line numbers below are correct for 2026-08-06 and do not resolve today.
 
-That matters because the two modes have *different protocols*, and only the author
-uses either one correctly. [CORE] `src/ecmascript/es_io.c:796-801`: in **sync**
+[READ] `api.js:154` passes `true` as the third argument to
+`io.httpInspectorCreate`. **One other plugin passes `true`** — trakt
+(`src/api.js:43`). The remaining three pass `false` explicitly: qobuz
+(`lib/inspector.js:72`, `:98`), HDRezka (`utils/httpInspector.js:152`, `:223`,
+`:247`) and anilibria (`lib/transport.js:34`).
+
+That matters because the two modes have *different protocols*, and two of the three
+sync users get theirs wrong. [CORE] `src/ecmascript/es_io.c:796-801`: in **sync**
 mode the callback's **return value** is the verdict — `1` means "I did nothing",
 anything else means "I handled it". `src/ecmascript/es_io.c:635-645`: `proceed()`
 only signals anything when `ehi_async` is set.
@@ -136,12 +146,19 @@ only signals anything when `ehi_async` is set.
 - youtube's async inspector never returns; it calls `ctrl.proceed()`
   (`api.js:22`, `:53`, `:134`) and `ctrl.fail()` (`api.js:125`, `:146`) — the
   async protocol, correctly.
-- qobuz `lib/inspector.js:71`, HDRezka `utils/httpInspector.js:222` and
-  anilibria `lib/api.js:31-43` call `proceed()` **in sync mode, where it is a
-  no-op**. They work only because a function that falls off the end returns
-  `undefined`, which `duk_get_boolean` coerces to `0` — the same verdict `return 0`
-  gives. [INFER] Three independent authors adopted a call that does nothing,
-  because it reads like the thing they wanted.
+- qobuz (`lib/inspector.js:71`, `:97`) and HDRezka (`utils/httpInspector.js:142`,
+  `:222`) call `proceed()` **in sync mode, where it is a no-op**. They work only
+  because a function that falls off the end returns `undefined`, which
+  `duk_get_boolean` coerces to `0` — the same verdict `return 0` gives. [INFER] Two
+  independent authors adopted a call that does nothing, because it reads like the
+  thing they wanted. anilibria's sync inspector (`lib/transport.js:22-34`) calls
+  neither `proceed()` nor `return 0`; it falls off the end, which is accidentally
+  the correct verdict.
+  (Corrected 2026-08-10: this bullet read "three independent authors" and counted
+  anilibria among them. Checked against the tree this survey actually read
+  (`3802256`, 2026-08-05): `lib/api.js:32-44` sets headers and a cookie and ends at
+  `}, false);` — no `proceed`, no `return`. The claim was false on the day it was
+  written, and the citation beside it was the disproof.)
 
 **Design vs. workaround: the author's is the design.** `return 0` in sync mode is
 what the C reads. `proceed()` is the async handshake. The community collapsed the
@@ -158,8 +175,9 @@ back 401 raises the popup, and the request that triggered it is resumed with
 [CORE] `authFailed` and async mode arrived in the same commit, `ed878c718`
 (2016-04-28) — the feature exists to make exactly this shape possible.
 
-**The community copied the popup and dropped the mechanism.** [READ]
-`movian-plugin-trakt/src/auth.js:9-133` is a near-verbatim descendant of
+**The community copied the popup — and, in the one case measured, the mechanism
+with it.** [READ] `movian-plugin-trakt/src/auth.js:9-133` is a near-verbatim
+descendant of
 `api.js:74-153` — same `credentials.apiauth` / `credentials.refresh_token` names,
 same `interval += 1000` slow-down (`auth.js:95` vs `api.js:115`), same
 `prop.setParent(message, prop.global.popups)` (`auth.js:44` vs `api.js:86`), and
@@ -168,14 +186,37 @@ destroy itself when the popup is destroyed. Without this we will retain referenc
 to captured variables indefinitely" (`auth.js:128-131` vs `api.js:149-152`).
 `movian-plugin-trakt/trakt.js:41` is byte-identical to `api.js:3`.
 
-But trakt has no inspector at all — [MEASURED] zero `httpInspectorCreate` calls in
-its source. It calls `auth.login()` eagerly instead of on 401.
+> **Retracted 2026-08-10.** This paragraph asserted "[MEASURED] zero
+> `httpInspectorCreate` calls" in trakt and built the section's conclusion on it.
+> The measurement was wrong and the conclusion it carried was the inverse of the
+> truth. Both are replaced below. The claim is what a `[MEASURED]` tag is supposed
+> to make impossible, and it survived to a fifth review; see the note at the end of
+> this section.
 
-**youtube functioned as the missing documentation, and was copied
-non-uniformly** — the visible half (the popup) propagated, the structural half
-(lazy 401-triggered auth) did not. [INFER] This is the single strongest argument
-that a written canon changes outcomes: the copyable part travelled, the
-architectural part did not.
+[MEASURED] trakt has **one** inspector, `src/api.js:11-43`, and it is the same
+shape as youtube's: `io.httpInspectorCreate('https://api.trakt.tv/.*', ..., true)`
+— async mode (`:43`), skipping `/oauth/` via `ctrl.ignore()` (`:13-16`) to avoid a
+loop, attaching `Authorization` when a token exists (`:18-23`), and on
+`ctrl.authFailed` clearing the token (`:26`), trying `auth.refreshToken()` (`:28-35`)
+and falling back to the full device-code login (`:38-42`), resuming with
+`ctrl.proceed()` rather than re-issuing. The one `auth.login()` outside the inspector is `trakt.js:59`, the
+callback of a `settings.createAction("login", ...)` button — a user-initiated
+re-login for switching accounts, not an eager startup login.
+
+**youtube functioned as the missing documentation, and the one plugin that
+demonstrably read it copied both halves** — the popup *and* the lazy 401-triggered
+inspector. [INFER] That is a weaker argument for a written canon than the inverse
+would have been, and it should be stated as the weaker one: the corpus shows the
+architecture travelling when a close reader copies a close neighbour, and says
+nothing about what reaches everyone else. The seven plugins with no descent from
+youtube are the population a canon is actually for.
+
+**What this cost.** [INFER] The false measurement propagated into the skill
+(`[4/9]` inspector count, "youtube is the only plugin that gets this right",
+"dropped the mechanism, calling `login()` eagerly instead") and survived four
+reviews before a fifth reader checked the source. A `[MEASURED]` tag is a claim
+that a command was run; this one was not, or was run against the wrong tree.
+Treat an unreproduced `[MEASURED]` as `[INFER]`.
 
 ### 2.4 `Duktape.modSearch` wrapping to host an unmodified npm package
 

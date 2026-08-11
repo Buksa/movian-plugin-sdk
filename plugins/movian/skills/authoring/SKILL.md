@@ -34,10 +34,14 @@ anilibria's `lib/pagination.js` is HDRezka's loop extracted by the same author.
 
 ## The dialect
 
-**Write ES5.1 by hand. Do not add a build step.** `[6/9]` `[CORE]` Six of nine write
-ES5 directly — proven by parsing every shipped file with acorn at `ecmaVersion: 5`.
-Duktape has no `let`/`const`, no arrow functions, no template literals, no `class`, no
-`Promise`, no `Object.entries`.
+**Duktape runs ES5.1 and nothing later.** `[CORE]` No `let`/`const`, no arrow functions,
+no template literals, no `class`, no `Promise`, no `Object.entries`. That is the
+never-deviate part.
+
+**So write ES5.1 by hand, and do not add a build step for a new plugin.** `[6/9]` Six of
+nine write ES5 directly — proven by parsing every shipped file with acorn at
+`ecmaVersion: 5`. This is the corpus majority and the recommended default, not a core
+constraint: three plugins do build, and the guidance for an existing build tree is below.
 
 - Take types from the generated `.d.ts` with `"noEmit": true`. Three plugins already do
   exactly that; it is not a build step. The working config:
@@ -64,8 +68,8 @@ from, and a checkout can be months behind without saying so.** Two things arrive
 core during 2026-08 that the typing rules here require:
 
 ```sh
-grep -c 'interface Page'   "$(mdev core)/generated/movian-api.d.ts"   # need 1
-grep -c 'declare const Plugin' "$(mdev core)/generated/movian-api.d.ts"   # need 1
+grep -c 'interface Page'   "$(mdev core)/generated/movian-api.d.ts"   # need >= 1
+grep -c 'declare const Plugin' "$(mdev core)/generated/movian-api.d.ts"   # need >= 1
 ```
 
 - **No `interface Page`** → `movian/page` exports only `Route` and `Searcher` as
@@ -135,8 +139,11 @@ say so in a comment.
 service.create(manifest.title, PREFIX + ':start', 'video', true, LOGO);
 ```
 
-`[9/9]` — identical five arguments, identical `:start` URL convention, exactly one
-service per plugin, `enabled` truthy. `[CORE]` `service.c:116-124` filters on `enabled`,
+`[9/9]` — five arguments in that order, identical `:start` URL convention, exactly one
+service per plugin, `enabled` truthy. Only the *third* argument varies, and the section
+on it below says how. The call itself differs in one plugin: tmdb reaches it as
+`plugin.createService` (`tmdb.js:24`), the apiversion-1 spelling of the same function.
+`[CORE]` `service.c:116-124` filters on `enabled`,
 and that is the only gate — there is no separate "register on home" call.
 
 **The home screen clones `$core.services.stable`, not `.enabled`.** `[CORE]`
@@ -580,8 +587,9 @@ the remaining seven ignore it.
 ### Inspectors — auth, and headers the player needs
 
 `io.httpInspectorCreate(pattern, callback, async)` is on `native/io`, not on
-`movian/http`. `[4/9]` — four plugins reached past the documented module to find it, for
-OAuth 401s, anti-bot cookies and Cloudflare impersonation.
+`movian/http`. `[5/9]` — five plugins register one (youtube, trakt, HDRezka, anilibria,
+qobuz), four of them reaching past the documented module to find it, for OAuth 401s,
+anti-bot cookies and Cloudflare impersonation.
 
 Use it for anything that must reach requests **you do not make** — the media URLs the
 player opens directly never pass through your `http.request` calls.
@@ -594,16 +602,26 @@ player opens directly never pass through your `http.request` calls.
 | async | `true` | **`ctrl.proceed()` / `ctrl.fail()`** (`es_io.c:635-645`) |
 
 `proceed()` **does nothing in sync mode.** `[AUTHOR]` youtube is the only plugin that
-gets this right in both directions; three others call `proceed()` synchronously and work
-only by accident, because falling off the end returns `undefined`, which coerces to the
-same verdict as `return 0`.
+uses both modes, and gets both right. trakt gets async right (`src/api.js:43` passes
+`true`, and every branch ends in `ctrl.proceed()` or `ctrl.ignore()`). Two of the three
+sync users — HDRezka (`utils/httpInspector.js:142`, `:222`) and qobuz
+(`lib/inspector.js:71`, `:97`) — call `proceed()` synchronously, where it is a no-op, and
+work only by accident: falling off the end returns `undefined`, which coerces to the same
+verdict as `return 0`. `[2/9]` anilibria (`lib/transport.js:22-34`) calls neither and is
+accidentally correct. **No plugin in the corpus signals sync mode deliberately except
+youtube's own `return 0` (`youtube.js:50`).**
 
 **Credentials belong on the 401, not on a login button.** `[AUTHOR]` youtube puts the
 entire device flow inside an async inspector gated on `ctrl.authFailed`, and resumes the
 request that triggered it with `proceed()` rather than re-issuing. `authFailed` and async
-mode landed in the same core commit — the feature exists for this shape. The one plugin
-that copied that popup copied it comment-for-comment and **dropped the mechanism**,
-calling `login()` eagerly instead. `[COPIED]`
+mode landed in the same core commit — the feature exists for this shape.
+
+trakt, whose `src/auth.js` is a near-verbatim descendant of youtube's `api.js`, kept the
+mechanism as well as the popup: `src/api.js:11-43` is the same async-inspector shape,
+refreshing the token and falling back to device login on `ctrl.authFailed`. `[COPIED]`
+Its `settings.createAction("login", ...)` button (`trakt.js:57-59`) is a *second* entry
+point for switching accounts, not the primary auth path — which is the right way to
+offer one. Do the same: inspector first, button as an extra.
 
 Do not set `noAuth` on a request you want an inspector to see.
 

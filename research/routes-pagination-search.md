@@ -183,11 +183,14 @@ resume position are bound automatically for video items, keyed on the canonical 
 
 ## 1. Per plugin
 
-### 1.1 HDRezka — `require('movian/x')`, swc build, 17 routes
+### 1.1 HDRezka — `require('movian/x')`, swc build, 16 routes
 
 - **Routes.** `routes/index.js:12` wraps every registration in an `init()` function
   called from the entry point; each is `new page.Route(PREFIX + ':<verb>', handler)` at
-  `routes/index.js:13,17,22,28,34,40,46,51,94,102,106,110,114,122,152,165`.
+  `routes/index.js:13,17,22,28,34,40,46,51,94,102,106,110,114,122,152,165` — sixteen
+  sites, and `grep -c 'new page.Route' routes/index.js` returns 16 repo-wide. (This
+  heading read "17 routes" until 2026-08-10; the citation list was right and the count
+  was not.)
 - **Arguments.** Two idioms. (a) A single opaque capture that the handler decodes:
   `routes/index.js:22` `PREFIX + ':catalog:(.*)'` → `ui.decodePayload(payload)` at `:23`.
   (b) A **shared six-group pattern**, `ROUTE_PATTERN` (`utils/ui.js:8`, re-exported from
@@ -546,7 +549,10 @@ These need the canon only to *record* the answer, not to choose one.
 2. **How arguments reach the handler.** Positional regex capture groups after the Page —
    9/9, because `page.js:394-396` offers nothing else.
 3. **How a service is created.** `service.create(title, url, type, enabled, icon)` with
-   `url = PREFIX + ':start'` — 9/9, identical five arguments, identical URL convention.
+   `url = PREFIX + ':start'` — 9/9 on the five-argument shape and the URL convention.
+   (Corrected 2026-08-10: "identical five arguments" overstated it. The third argument
+   varies — qobuz passes `'music'`, dailymotion and soap4.me read it from the manifest —
+   and tmdb reaches the function as `plugin.createService`, the apiversion-1 spelling.)
 4. **What makes it appear on the home screen.** `enabled` truthy → `$global.services.enabled`
    (`service.c:116-124`). There is no second mechanism.
 5. **How an item is added.** `page.appendItem(url, type, metadataObject)` — 9/9. Passive

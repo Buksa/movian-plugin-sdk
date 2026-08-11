@@ -12,6 +12,14 @@
 > success check should accept the **2xx range**, `noFail` **does** cover 401 on a current
 > core, and route priority has no reachable `INT32_MAX` case.
 
+> **anilibria moved after this was written.** Its `lib/api.js` was 282 lines on
+> 2026-08-05, the tree measured here. On **2026-08-08** commit `c39d44a` split it: the
+> HTTP transport, the inspector, the TTL constants and the cache-hit check now live in
+> `lib/transport.js` (95 lines), and `lib/api.js` is down to 71. Every `lib/api.js` line
+> number below is correct as of 2026-08-06 and will not resolve in a current checkout —
+> read them with `git show 3802256:lib/api.js`. Nothing in the findings changes; the code
+> moved, it did not change behaviour.
+
 Research for [issue #21](https://github.com/Buksa/movian-plugin-sdk/issues/21),
 part of the authoring-canon map [#19](https://github.com/Buksa/movian-plugin-sdk/issues/19).
 Investigated 2026-08-06.
@@ -348,7 +356,9 @@ qobuz is the decisive case for §5. Its comments **cite core line numbers**:
 (`fa_http.c:1502`) instead of dying with "Authentication without realm", and that
 inspectors are skipped under `noAuth` (`fa_http.c:3115`). `lib/qobuz.js:85-90` records
 that `noFail` does **not** cover 401 because `case 401` is handled ahead of the `default`
-branch. `lib/inspector.js:34-37` notes that Movian stops at the first matching inspector
+branch — **true when that comment was written, and no longer true**: core #149 / PR #154
+made `case 401` honour `FA_CONTENT_ON_ERROR`, so `noFail` covers 401 on a current core.
+Read the qobuz comment as a historical record of the core it was written against. `lib/inspector.js:34-37` notes that Movian stops at the first matching inspector
 and the list is head-inserted, so the two patterns must be mutually exclusive.
 
 This author read `es_io.c` and `fa_http.c` line by line — and set **no cache flag
@@ -511,6 +521,12 @@ Each rule has a plugin and a line behind it.
 3. **Then check `statuscode`, exempting `0`.** `noFail` moves the error gate into your
    code. `res.statuscode === 0` means "served from cache", not "failed" — `es_io.c:243`
    + `fileaccess.c:1621`. Model: `api/requestPipeline.js:103-104`.
+   > **Superseded — do not copy this rule.** It is incomplete in two ways found after
+   > this survey was written: a cache hit also arrives as **`304`**
+   > (`fa_http.c:3187`, `fileaccess.c:1701-1709`), and the check should accept the whole
+   > **2xx range**, not `200` alone. The canon carries the corrected form; a plugin
+   > written to the rule as stated here shows an error page on a revalidated cache hit.
+   > Measured — it is how core #181 was found.
 4. **To cache, pass `cacheTime` — never `caching` alone.** `caching: true` is vetoed by
    any non-`user-agent` header (`es_io.c:414-415`, `:145-154`) and, if it survives,
    stores nothing unless the origin permits (`fileaccess.c:1742`). `cacheTime: N` skips
@@ -527,6 +543,10 @@ Each rule has a plugin and a line behind it.
    (`fileaccess.c:1742`), including anti-bot interstitials and login walls. If your
    source can serve those, validate the *body* and retry with `caching: false` on
    failure. Model: `api/requestPipeline.js:145-159`.
+   > **Superseded — do not copy the retry.** `caching: false` does **not** bypass a
+   > poisoned entry; the read side is driven by `cacheTime`, so the retry must clone the
+   > options and `delete` that field. HDRezka's model line has the same defect. The
+   > canon carries the working form.
 8. **Return cache provenance to callers.** UI pacing depends on it — a cached page
    returns instantly and can trigger runaway pagination
    (`pages/catalog.js:33-37`). Model: `lib/api.js:135-138`.
