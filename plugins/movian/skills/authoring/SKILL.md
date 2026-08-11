@@ -110,7 +110,18 @@ grep -c 'declare const Plugin' "$(mdev core)/generated/movian-api.d.ts"   # need
 - **No `declare const Plugin`** → the config above reports TS2304 on `Plugin`,
   `console` and `setTimeout` before you have written anything unusual.
 
-If either is missing, regenerate (`support/devtools/metadata/gen.py`) or pull the core.
+Those two greps are a **minimum-version gate, not a freshness check** — they pass as soon
+as the artifact contains the declarations, so a core whose sources moved after the last
+generation still reads green and any unrelated addition or signature change stays
+invisible. The authoritative check regenerates and diffs:
+
+```sh
+python3 "$(mdev core)/support/devtools/metadata/gen.py" --check
+```
+
+Run that first; use the greps only as a cheap pre-filter. See `movian:api` for the same
+check in its own context. If either grep is missing, or `--check` reports a diff,
+regenerate or pull the core.
 Measured the hard way: a from-scratch author on a checkout four merges behind had to
 hand-transcribe `Page` and `Item` out of `res/ecmascript/modules/movian/page.js` to get
 any checking at all, and the clean `tsc` run before that was **vacuous**. Mutation-test
@@ -363,14 +374,16 @@ different item directory:
 
 | `contents` | page view | item views |
 |---|---|---|
-| unset, most values | `list.view:33` | `items/list/<type>.view` → `list/default.view` |
+| unset, most values — including `plugins`, which the core sets itself at `plugins.c:1049`, `:1150` and which has **no** dedicated page | `list.view:33` | `items/list/<type>.view` → `list/default.view` |
 | `grid`, `images` | `grid.view:34` | `items/rect/<type>.view` → `rect/default.view` |
 | `searchresults` | `searchresults.view:36` | `items/rect/…` |
 
-`items/list/` has 18 views — `separator`, `info`, `video`, `audio`, `image`, `person`,
+`items/list/` has 23 views — `separator`, `info`, `video`, `audio`, `image`, `person`,
 `event`, `tvchannel`, `tvepisode`, `action`, `station`, `plugin`, `location`, `network`,
-`font`, `add`, `search`, `default`. **`items/rect/` has 8** — `audio`, `image`, `plugin`,
-`search`, `separator`, `station`, `video`, `default`. So on a grid page most types you
+`font`, `add`, `search`, `default`, plus the five settings widgets `bool`, `string`,
+`integer`, `multiopt` and `settings` (see the warning below — naming one of those from a
+content page gives the user an input, not a label). **`items/rect/` has 8** — `audio`,
+`image`, `plugin`, `search`, `separator`, `station`, `video`, `default`. So on a grid page most types you
 can name fall through to `rect/default.view`, including `info`.
 
 The two defaults do not draw the same things either: `list/default.view` reads
@@ -698,7 +711,7 @@ This corpus has produced wrong findings repeatedly, always the same two ways.
   ```sh
   find <repo> \( -name node_modules -o -name .git -o -name .codegraph \
     -o -name dist -o -name 'build*' -o -name releases -o -name tests \) -prune \
-    -o -type f \( -name '*.js' -o -name '*.ts' \) -print0 | xargs -0 grep -n '<pattern>'
+    -o -type f \( -name '*.js' -o -name '*.ts' \) -print0 | xargs -0 grep -n -e '<pattern>'
   ```
 - **Before "N plugins agree", check whether the N share a lineage.** `[COPIED]`
 
