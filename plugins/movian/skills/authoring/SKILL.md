@@ -32,6 +32,38 @@ Every rule carries one. **The tag is your permission to deviate.**
 near-verbatim descendant of youtube's `api.js`, three comments word-for-word, and
 anilibria's `lib/pagination.js` is HDRezka's loop extracted by the same author.
 
+### What `[n/9]` is not
+
+**Nine plugins are not nine authors.** Original authorship, from the first commit of each
+checkout:
+
+| author | plugins | first commit |
+|---|---|---|
+| Andreas Smas (andoma, the core's author) | youtube | 2016-05-01 |
+| Anton Ignatov | soap4.me | 2016-03-06 |
+| Fábio Ferreira | trakt, dailymotion | 2016-06-15, 2016-08-25 |
+| Louis Marotta | m7-jellyfin | 2025-11-29 |
+| this repo's owner | HDRezka, anilibria, qobuz | 2026-05-03, 2026-07-17, 2026-08-02 |
+| unknown — no git history | tmdb | — |
+
+So `[9/9]` is nine plugins and **at most six** independent decisions, and any `[n/9]`
+that leans on the 2026 trio is one author, not three. Two consequences that matter more
+than the arithmetic:
+
+- **`[9/9]` still means "never deviate"** — not because nine authors agreed, but because
+  a claim that holds across every plugin regardless of authorship is usually a claim
+  about what the API makes possible. Read a full count as evidence about the *API*, and
+  the tag as the only evidence about the *authors*.
+- **The 2026 trio is not independent of this canon.** HDRezka, anilibria and qobuz were
+  written recently, in this workspace, with agent assistance. Where they agree with a
+  rule here, that agreement may be an echo of the tooling rather than a discovery. Treat
+  convergence that rests only on those three as `[COPIED]`-strength, and prefer evidence
+  from the 2016 plugins and m7-jellyfin, which were written with no knowledge of any of
+  this.
+
+`[COPIED]` also covers descent: trakt's `src/auth.js` from youtube's `api.js`, and
+anilibria's `lib/pagination.js` from HDRezka's loop.
+
 ## The dialect
 
 **Duktape runs ES5.1 and nothing later.** `[CORE]` No `let`/`const`, no arrow functions,
@@ -158,7 +190,9 @@ home screen against `services/enabled` inspects the wrong node.
 it**, so the two types the whole corpus uses would render as a generic folder. All nine
 pass an icon, which is why nobody has noticed.
 
-`type` is `'video'` for eight of nine; qobuz uses `'music'`. dailymotion and soap4.me
+`type` is `'video'` for eight of nine; qobuz uses `'music'`. Verified including the two
+that do not write the literal: dailymotion's and soap4.me's manifests both declare
+`"category": "video"`, so they resolve to `'video'` at runtime. dailymotion and soap4.me
 read it from the manifest's `category` — `[2/9]`, and it inherits the hazard above:
 `category: "other"` is in no icon table either.
 
@@ -403,8 +437,9 @@ page.asyncPaginator = loader;
 loader();
 ```
 
-`[4/9]` and matched by the `async_page_load` example. **Order decides whether the first
-load counts as pagination.** Assigning `asyncPaginator` and then calling `loader()`, as
+`[4/9]` — four of the six `asyncPaginator` users assign then call, in that order; it is a
+sub-count of the `[6/9]` above, not a competing one. Matched by the `async_page_load`
+example. **Order decides whether the first load counts as pagination.** Assigning `asyncPaginator` and then calling `loader()`, as
 above, means the first batch runs through the same path as every later one. youtube does
 the reverse — loads once, *then* assigns (`browse.js:274-275`) — so its first page is not
 pagination and a re-filter can reset the cursor without racing the paginator. Pick
@@ -504,9 +539,12 @@ not arrive as 200, and it arrives two different ways:
 
 - **`0` — fresh from the blob cache.** `fileaccess.c:1621` sets the protocol code to 0
   and the fresh-from-cache early return never assigns it, so the response arrives with
-  `statuscode === 0` and `err === null`. Three independent authors found this without
-  documentation — the strongest convergence in the corpus, and it is convergence on
-  working around a defect.
+  `statuscode === 0` and `err === null`. Three plugins found this without documentation
+  — `[3/9]`, but HDRezka and anilibria share an author, so **two** independent
+  discoveries: this repo's owner and dailymotion's Fábio Ferreira, who has no connection
+  to the others. Two unconnected authors both having to learn an undocumented sentinel is
+  still the strongest convergence in the corpus, and it is convergence on working around
+  a defect.
 - **`304` — a cached entry the core revalidated.** `fileaccess.c:1701-1709` returns the
   **cached body** while `fa_http.c:3187` has already put 304 in the protocol code, which
   `es_io.c:243` passes straight through as `res.statuscode`. So you get a complete,
@@ -577,7 +615,8 @@ you the full parse. Add your own TTL map for parsed objects and for anything key
 domain identity rather than a URL. A ~110-line factory with expire-on-read and size
 eviction is enough.
 
-**8. Return cache provenance to your callers.** `[2/9]` UI pacing depends on it — see
+**8. Return cache provenance to your callers.** `[COPIED]` — HDRezka and anilibria both
+do it, but they share an author, so this is one decision, not two. UI pacing depends on it — see
 the `haveMore` delay above.
 
 **9. Back off on 429.** One plugin in nine implements a backoff (trakt, additive on the
@@ -588,8 +627,10 @@ the remaining seven ignore it.
 
 `io.httpInspectorCreate(pattern, callback, async)` is on `native/io`, not on
 `movian/http`. `[5/9]` — five plugins register one (youtube, trakt, HDRezka, anilibria,
-qobuz), four of them reaching past the documented module to find it, for OAuth 401s,
-anti-bot cookies and Cloudflare impersonation.
+qobuz), for OAuth 401s, anti-bot cookies and Cloudflare impersonation. Read the count with
+the authorship table above: that is **three** authors, and of the four who reached past
+the documented module rather than being handed it, only Fábio Ferreira (trakt) is outside
+the 2026 trio.
 
 Use it for anything that must reach requests **you do not make** — the media URLs the
 player opens directly never pass through your `http.request` calls.
@@ -607,7 +648,8 @@ uses both modes, and gets both right. trakt gets async right (`src/api.js:43` pa
 sync users — HDRezka (`utils/httpInspector.js:142`, `:222`) and qobuz
 (`lib/inspector.js:71`, `:97`) — call `proceed()` synchronously, where it is a no-op, and
 work only by accident: falling off the end returns `undefined`, which coerces to the same
-verdict as `return 0`. `[2/9]` anilibria (`lib/transport.js:22-34`) calls neither and is
+verdict as `return 0`. `[COPIED]` — both are the same author's, so this is one mistake
+made twice rather than two plugins agreeing. anilibria (`lib/transport.js:22-34`) calls neither and is
 accidentally correct. **No plugin in the corpus signals sync mode deliberately except
 youtube's own `return 0` (`youtube.js:50`).**
 

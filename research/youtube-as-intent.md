@@ -2,15 +2,13 @@
 
 > **Point-in-time survey — read the canon, not this, for current rules.**
 > Investigated on the date stated below against the checkouts as they then stood. It is
-> the measurement record behind
+> a measurement record behind
 > [`movian:authoring`](../plugins/movian/skills/authoring/SKILL.md), not a substitute for
-> it. Where the two disagree the skill wins: it has been corrected by later measurement
-> and by running the code, and this file is deliberately **not** rewritten to match, so
-> the reasoning that produced a wrong rule stays visible. Known corrections carried by
-> the skill and not by these surveys: a cache hit also arrives as **HTTP 304**, bypassing
-> a poisoned entry needs `cacheTime` **deleted** rather than `caching: false`, the
-> success check should accept the **2xx range**, `noFail` **does** cover 401 on a current
-> core, and route priority has no reachable `INT32_MAX` case.
+> it. **Where the two disagree the skill wins.** The reasoning that produced a wrong rule
+> is deliberately left standing rather than rewritten, so it stays visible.
+> This file makes interpretive claims about intent, and two of them were **wrong when
+> written** — see the retractions in §2.2 and §2.3, and the matching corrections in §8.
+> They are marked in place rather than deleted.
 
 Research for [issue #23](https://github.com/Buksa/movian-plugin-sdk/issues/23),
 part of the [plugin authoring canon](https://github.com/Buksa/movian-plugin-sdk/issues/19).
@@ -149,9 +147,10 @@ only signals anything when `ehi_async` is set.
 - qobuz (`lib/inspector.js:71`, `:97`) and HDRezka (`utils/httpInspector.js:142`,
   `:222`) call `proceed()` **in sync mode, where it is a no-op**. They work only
   because a function that falls off the end returns `undefined`, which
-  `duk_get_boolean` coerces to `0` — the same verdict `return 0` gives. [INFER] Two
-  independent authors adopted a call that does nothing, because it reads like the
-  thing they wanted. anilibria's sync inspector (`lib/transport.js:22-34`) calls
+  `duk_get_boolean` coerces to `0` — the same verdict `return 0` gives. [INFER] Both
+  are this repo owner's plugins, so this is **one** author making the same mistake
+  twice, not convergence — it reads like the thing they wanted, and nothing in the
+  API says otherwise. anilibria's sync inspector (`lib/transport.js:22-34`) calls
   neither `proceed()` nor `return 0`; it falls off the end, which is accidentally
   the correct verdict.
   (Corrected 2026-08-10: this bullet read "three independent authors" and counted
@@ -523,12 +522,14 @@ Ranked by strength of evidence.
    [CORE] `src/plugins.c:2211-2221`. Uncontested, unique, deliberate.
 2. **HTTP inspectors have two protocols; do not mix them.** Sync → `return 0`.
    Async (third arg `true`) → `proceed()` / `fail()`. Cite `youtube.js:50`,
-   `api.js:22/125/134/154`, [CORE] `es_io.c:635-645`, `:796-801`. Three community
-   plugins get this wrong harmlessly today.
+   `api.js:22/125/134/154`, [CORE] `es_io.c:635-645`, `:796-801`. **Two** community
+   plugins get this wrong harmlessly today — HDRezka and qobuz. (Corrected 2026-08-10
+   with §2.2: this read "three" and counted anilibria, which calls no `proceed`.)
 3. **Credentials belong on the 401, not on a login button.** Register an async
    inspector, gate on `ctrl.authFailed`, resume with `proceed()`. Cite
-   `api.js:12-154`. Note that the one plugin that copied the popup dropped the
-   mechanism.
+   `api.js:12-154`. (Corrected 2026-08-10 with §2.3: this read "the one plugin that
+   copied the popup dropped the mechanism". It did not — trakt kept it,
+   `src/api.js:11-43`. The recommendation stands; the cautionary example was false.)
 4. **`page.metadata.icon` is what RENDERS; `logo` feeds bookmarks.** Cite [CORE]
    `theme.view:167` for the first and `navigator.c:706-712` for the second. The four
    plugins writing `logo` are not wrong — they are setting a different thing. Whether

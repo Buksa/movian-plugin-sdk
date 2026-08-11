@@ -2,15 +2,15 @@
 
 > **Point-in-time survey — read the canon, not this, for current rules.**
 > Investigated on the date stated below against the checkouts as they then stood. It is
-> the measurement record behind
+> a measurement record behind
 > [`movian:authoring`](../plugins/movian/skills/authoring/SKILL.md), not a substitute for
-> it. Where the two disagree the skill wins: it has been corrected by later measurement
-> and by running the code, and this file is deliberately **not** rewritten to match, so
-> the reasoning that produced a wrong rule stays visible. Known corrections carried by
-> the skill and not by these surveys: a cache hit also arrives as **HTTP 304**, bypassing
-> a poisoned entry needs `cacheTime` **deleted** rather than `caching: false`, the
-> success check should accept the **2xx range**, `noFail` **does** cover 401 on a current
-> core, and route priority has no reachable `INT32_MAX` case.
+> it. **Where the two disagree the skill wins.** The reasoning that produced a wrong rule
+> is deliberately left standing rather than rewritten, so it stays visible.
+> Corrections found after this was written are marked **inline**, on the rules they
+> affect: a cache hit also arrives as **HTTP 304** (§6 rule 3), bypassing a poisoned
+> entry needs `cacheTime` **deleted** rather than `caching: false` (§6 rule 7), and
+> `noFail` **does** cover 401 on a current core (§3.9). The success check should accept
+> the whole **2xx range**, not `200` alone.
 
 > **anilibria moved after this was written.** Its `lib/api.js` was 282 lines on
 > 2026-08-05, the tree measured here. On **2026-08-08** commit `c39d44a` split it: the
@@ -68,9 +68,18 @@ recovery code for exactly this — `api/requestPipeline.js:155-159` detects an a
 page that came *from cache* and re-issues with `caching: false`.
 
 **Is the split need or knowledge?** Both, and they are separable — see §5. The short
-form: **`caching: true` on its own is advisory and, in two of the five plugins that set
-it, provably inert; `cacheTime: N` is the only imperative form, and only two plugins
-found it.** That is a knowledge gap, and it is a knowledge gap the core created by
+form: **`caching: true` on its own is advisory; `cacheTime: N` is the only imperative
+form, and only two plugins found it.**
+
+> **Corrected 2026-08-10.** This sentence read "in two of the five plugins that set it,
+> provably inert", which does not reconcile with §5 below ("three who found a spelling
+> that is advisory or inert") or with the per-plugin table in §3. Of the five that set a
+> cache flag: **trakt** is the only one whose `caching: true` is provably inert *and
+> consequential* — it sets `Content-Type`, so `es_io.c:415` voids it and nothing is
+> cached. **youtube** and **dailymotion** set no request header, so theirs survives and
+> caches, at a lifetime the origin chooses. **HDRezka** and **anilibria** set headers
+> too, so their `caching` flag is voided as well — but `cacheTime` carries them, so it
+> costs them nothing. No single number is honest here, which is why the count is gone. That is a knowledge gap, and it is a knowledge gap the core created by
 making the weaker spelling the obvious one.
 
 ---
@@ -190,7 +199,8 @@ early return at `fileaccess.c:1673-1680` never assigns it. `es_io.c:242-243` the
 `ehr_http_status` as `res.statuscode`. So **a response served from the blob cache arrives
 with `statuscode === 0`, and `err` is null.**
 
-This is nowhere in `movian/http.js`. Three independent authors found it anyway:
+This is nowhere in `movian/http.js`. Three plugins found it anyway — two independent
+authors, see the qualification below:
 
 - HDRezka — `api/requestPipeline.js:103` `var isCache = res.statuscode === 0;`
 - anilibria — `lib/api.js:126` `var cacheHit = (res.statuscode === 0);`
@@ -201,6 +211,13 @@ All three then had to special-case it in their status check, because a naive
 `statuscode !== 200` treats every cache hit as a failure — see
 `api/requestPipeline.js:104` and `lib/api.js:128`. **This is the single strongest
 convergence finding in the survey, and it is convergence on working around a defect.**
+
+> **Qualified 2026-08-10.** Three *plugins*, but HDRezka and anilibria are both this
+> repo owner's, so it is **two independent discoveries**, not three — the owner, and
+> dailymotion's Fábio Ferreira, who has no connection to the other two. The finding survives — two authors
+> with no contact both had to learn an undocumented sentinel — but it is weaker than
+> "three" implied, and the same correction applies to the cache-provenance bullet in §4
+> under "Converged, without contact", where HDRezka and anilibria are the only two cited.
 
 ### 2.3 The cache is not scoped to the caller's identity
 
@@ -430,7 +447,9 @@ away.** No knowledge of `caching` appears anywhere in the repo.
 
 - **`noFail: true` on essentially every request** — HDRezka `requestPipeline.js:83`,
   trakt `api.js:74`, youtube `api.js:172`, qobuz `qobuz.js:95`, dailymotion
-  `http.ts:38`. Five of nine, five different authors. [INFERRED] The default — throw, or
+  `http.ts:38`. Five of nine — but **three** authors, not five: HDRezka and qobuz are
+  this repo owner's, trakt and dailymotion are both Fábio Ferreira's, youtube is
+  andoma's. See the authorship table in the skill. [INFERRED] The default — throw, or
   hand back an error with no body — makes an API's own error message unreadable, so
   everyone turns it off.
 - **`compression: true`** — HDRezka `:82`, trakt `:75`, youtube `:173`, qobuz `:96`,
@@ -438,7 +457,8 @@ away.** No knowledge of `caching` appears anywhere in the repo.
 - **`statuscode === 0` means "from cache"** — HDRezka `requestPipeline.js:103`, anilibria
   `lib/api.js:126`, dailymotion `http.ts:80`. Three of three plugins that both cache and
   check status. Nobody could have read this anywhere.
-- **Cache provenance is propagated to callers** — HDRezka's third callback argument
+- **Cache provenance is propagated to callers** *(not independent — one author; see the
+  qualification in §2.2)* — HDRezka's third callback argument
   (`requestPipeline.js:112`, threaded through `rezka.js:31,50` into `pages/catalog.js:123`
   where it changes pagination timing), anilibria's `{data, cacheHit}` (`lib/api.js:135-138`).
 - **`io.httpInspectorCreate` is the answer to auth and to bot-defence** — trakt

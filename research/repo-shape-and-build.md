@@ -2,15 +2,12 @@
 
 > **Point-in-time survey — read the canon, not this, for current rules.**
 > Investigated on the date stated below against the checkouts as they then stood. It is
-> the measurement record behind
+> a measurement record behind
 > [`movian:authoring`](../plugins/movian/skills/authoring/SKILL.md), not a substitute for
-> it. Where the two disagree the skill wins: it has been corrected by later measurement
-> and by running the code, and this file is deliberately **not** rewritten to match, so
-> the reasoning that produced a wrong rule stays visible. Known corrections carried by
-> the skill and not by these surveys: a cache hit also arrives as **HTTP 304**, bypassing
-> a poisoned entry needs `cacheTime` **deleted** rather than `caching: false`, the
-> success check should accept the **2xx range**, `noFail` **does** cover 401 on a current
-> core, and route priority has no reachable `INT32_MAX` case.
+> it. **Where the two disagree the skill wins.** The reasoning that produced a wrong rule
+> is deliberately left standing rather than rewritten, so it stays visible.
+> No corrections have been found against this file. It does not cover HTTP, caching or
+> routing; for those see the sibling surveys.
 
 Research for [issue #20](https://github.com/Buksa/movian-plugin-sdk/issues/20),
 part of the [plugin authoring canon](https://github.com/Buksa/movian-plugin-sdk/issues/19).
