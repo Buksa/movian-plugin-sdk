@@ -134,8 +134,11 @@ var PREFIX   = manifest.id;
 var LOGO     = Plugin.path + manifest.icon;
 ```
 
-`[5/9]` — the corpus's clearest consensus, reached independently and undocumented
-(HDRezka, trakt, anilibria, m7-jellyfin, soap4.me). `[CORE]` `ecmascript.c:900` pushes
+`[5/9]` — the corpus's clearest consensus and wholly undocumented (HDRezka, trakt,
+anilibria, m7-jellyfin, soap4.me). Five plugins, **four** authors: HDRezka and anilibria
+are the same owner's, and the other three — Fábio Ferreira, Louis Marotta, Anton Ignatov
+— are unconnected to each other and to this repo, which is what makes it the strongest
+convergence here. `[CORE]` `ecmascript.c:900` pushes
 the manifest **text** onto the global `Plugin` for every plugin, so every consumer must
 `JSON.parse` it.
 
@@ -324,8 +327,8 @@ schema and no validation** — an unread key is silently inert.
   `glwskins/flat/items/list/default.view:19-20` resolves it as
   `"ic_" + $self.subtype + "_48px"`; 82 icons exist in that directory. Nobody else found
   this.
-- Separators are `page.appendItem('', 'separator', {title: ...})` — `[4/9]`, converged
-  without documentation.
+- Separators are `page.appendItem('', 'separator', {title: ...})` — `[4/9]` (HDRezka,
+  anilibria, m7-jellyfin, soap4.me), three authors, converged without documentation.
 - **The layout hint is `page.model.contents`, not `page.contents`.** `[CORE]`
   `glwskins/flat/pages/directory.view:47,58` reads `$self.model.contents`; `Page` has no
   `contents` accessor, so the shorter spelling is inert. Four plugins write the real one;
