@@ -113,20 +113,38 @@ grep -c 'declare const Plugin' "$(mdev core)/generated/movian-api.d.ts"   # need
 Those two greps are a **minimum-version gate, not a freshness check** — they pass as soon
 as the artifact contains the declarations, so a core whose sources moved after the last
 generation still reads green and any unrelated addition or signature change stays
-invisible. The authoritative check regenerates and diffs:
+invisible. The complementary check regenerates and diffs:
 
 ```sh
 python3 "$(mdev core)/support/devtools/metadata/gen.py" --check
 ```
 
-Run that first; use the greps only as a cheap pre-filter. See `movian:api` for the same
-check in its own context. If either grep is missing, or `--check` reports a diff,
-regenerate or pull the core.
-Measured the hard way: a from-scratch author on a checkout four merges behind had to
-hand-transcribe `Page` and `Item` out of `res/ecmascript/modules/movian/page.js` to get
-any checking at all, and the clean `tsc` run before that was **vacuous**. Mutation-test
-your own gate — write `page.searchable = true` and confirm it reddens — before believing
-a green one.
+**Neither one subsumes the other, and for the failure above it is the greps that answer.**
+Measured on the very checkout that produced it: `--check` reported `METADATA OK`, `DTS
+OK`, `coverage OK (missing 0, phantom 0)` and exited 0, while both greps returned `0`.
+`--check` asks "is the artifact consistent with the source beside it", and a merely-old
+checkout satisfies that completely — the artifact is not stale relative to its own
+sources; the sources are old. `--check` catches an artifact someone forgot to regenerate;
+the greps catch a core that predates the declarations. Run both.
+
+The grep half is mechanised — and asked as a question about behaviour rather than about
+text, so a declaration that is present but no longer load-bearing cannot satisfy it:
+
+```sh
+mdev types            # materialises the .d.ts AND compiles a deliberately-wrong probe
+```
+
+It prints `typefloor: OK` or `typefloor: FAILED`, naming the member that went unchecked;
+`mdev doctor` runs the same thing. (Both come from the SDK's `install.sh`; re-run it if
+your shim predates the check.) It does **not** replace `--check` — nothing there
+regenerates or diffs. See `movian:api` for the same ground in its own context.
+
+Keep the manual habit anyway, for any gate you build yourself: **mutation-test it. Write
+`page.searchable = true` and confirm it reddens before believing a green one.**
+
+Measured the hard way (movian#183): a from-scratch author on a checkout four merges behind
+had to hand-transcribe `Page` and `Item` out of `res/ecmascript/modules/movian/page.js` to
+get any checking at all, and the clean `tsc` run before that was **vacuous**.
 - **A compiler that emits ES5 accepts ES6 in silence.** `tsc --target ES5` downlevels a
   template literal instead of rejecting it, so the check goes green and Duktape throws
   `SyntaxError: invalid token` at load. That is the mechanism that hid a real dialect
