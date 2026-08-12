@@ -35,11 +35,18 @@ native/string  native/subtitle  native/websocket
 Use it to answer "does this module/export exist" definitively. Its **signatures
 are weak** — many members are typed `any` — so it settles existence, not shape.
 
-Verify it is current before trusting it:
+Two different questions decide whether to trust it, and neither answers the other:
 
 ```
-(cd "$(mdev core)" && python3 support/devtools/metadata/gen.py --check)
+(cd "$(mdev core)" && python3 support/devtools/metadata/gen.py --check)   # consistent with the source beside it?
+mdev types                                                               # still catches anything?
 ```
+
+`--check` regenerates and diffs, so it catches an artifact nobody regenerated. It
+cannot see a checkout that is simply **old** — there the artifact matches its own
+sources perfectly and `--check` exits 0 while the declarations that do the
+checking are absent. That is what `typefloor` in `mdev types` is for; see *Type
+checking a plugin* below.
 
 **2. Prose reference — `$(mdev core)/docs/Guides/PLUGIN_API_REFERENCE.md`**
 
