@@ -43,6 +43,7 @@ install_file() {
 echo "Installing Movian SDK shims:"
 install_file "$here/lib/locate.sh" "$libdir/locate.sh"
 install_file "$here/lib/viewdoc.py" "$libdir/viewdoc.py"
+install_file "$here/lib/typefloor.py" "$libdir/typefloor.py"
 install_file "$here/bin/mdev" "$bindir/mdev"
 install_file "$here/bin/movian-lsp" "$bindir/movian-lsp"
 

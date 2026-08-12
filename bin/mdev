@@ -21,15 +21,23 @@ fi
 # of a machine-specific one. A symlink by default: it cannot go stale as the core
 # is rebuilt. `--copy` vendors a snapshot instead, for a repo that must typecheck
 # without a core checkout.
+#
+# It then checks that the artifact it just handed over can actually catch a
+# defect (movian#183). This is the point of consumption -- the moment the author
+# starts trusting a green `tsc` -- and it is the last one where a useless
+# artifact can still be reported as useless. `--no-verify` skips it; nothing else
+# does, because "could not check" must not read the same as "checked, fine".
 if [ "${1:-}" = "types" ]; then
   shift
   movian_sdk_locate || exit 1
   src="$MOVIAN_SDK_CORE/generated/movian-api.d.ts"
   out="types/movian-api.d.ts"
   mode="link"
+  verify=1
   while [ $# -gt 0 ]; do
     case "$1" in
       --copy) mode="copy" ;;
+      --no-verify) verify=0 ;;
       --out) shift; out="$1" ;;
       *) echo "mdev types: unknown argument '$1'" >&2; exit 2 ;;
     esac
@@ -48,6 +56,9 @@ if [ "${1:-}" = "types" ]; then
   fi
   echo "$out -> $src ($mode)"
   echo "note: gitignore it unless you deliberately vendor a snapshot."
+  [ "$verify" -eq 1 ] || exit 0
+  echo
+  python3 "$MOVIAN_SDK_LIB/typefloor.py" --dts "$out" || exit 1
   exit 0
 fi
 
@@ -113,7 +124,26 @@ if [ "${1:-}" = "doctor" ]; then
   for tool in mdev mdevlib metadata movian-lsp lsp analyze smokes viewpreview gdb; do
     [ -e "$MOVIAN_SDK_CORE/support/devtools/$tool" ] || { echo "devtools:  MISSING $tool"; rc=1; }
   done
-  [ "$rc" -eq 0 ] && echo "devtools:  complete"
+  # `|| true`: under `set -e` a false test as the last command of the branch
+  # would abort the doctor here, skipping every check below it.
+  { [ "$rc" -eq 0 ] && echo "devtools:  complete"; } || true
+
+  # The checks above all ask the checkout about itself, so a checkout that is
+  # merely old answers every one of them correctly. This one asks whether the
+  # artifact an author compiles against still catches anything (movian#183).
+  dts="$MOVIAN_SDK_CORE/generated/movian-api.d.ts"
+  if [ ! -f "$dts" ]; then
+    echo "typefloor: MISSING $dts"
+    rc=1
+  else
+    floor_rc=0
+    floor="$(python3 "$MOVIAN_SDK_LIB/typefloor.py" --dts "$dts" 2>&1)" || floor_rc=$?
+    printf 'typefloor: %s\n' "$(printf '%s\n' "$floor" | head -1 | sed 's/^typefloor: //')"
+    if [ "$floor_rc" -ne 0 ]; then
+      printf '%s\n' "$floor" | tail -n +2
+      rc=1
+    fi
+  fi
 
   echo
   echo "--- core: mdev lsp doctor ---"
