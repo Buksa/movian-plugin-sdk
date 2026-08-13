@@ -58,8 +58,11 @@ if [ "${1:-}" = "types" ]; then
   echo "note: gitignore it unless you deliberately vendor a snapshot."
   [ "$verify" -eq 1 ] || exit 0
   echo
-  python3 "$MOVIAN_SDK_LIB/typefloor.py" --dts "$out" || exit 1
-  exit 0
+  # Propagate typefloor's status verbatim: it distinguishes 1 (the artifact
+  # does not check a plugin) from 2 (we could not find out). Collapsing them
+  # would tell a caller an artifact failed when nothing examined it.
+  python3 "$MOVIAN_SDK_LIB/typefloor.py" --dts "$out"
+  exit $?
 fi
 
 # `mdev viewdoc` is answered HERE because the canon split moved its inputs. The

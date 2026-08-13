@@ -100,13 +100,21 @@ def run(dts: Path, verbose: bool) -> int:
     with tempfile.TemporaryDirectory(prefix="typefloor-") as tmp:
         probe = Path(tmp) / "probe.ts"
         probe.write_text(PROBE)
+        # Run from the caller's directory, NOT from `tmp`. `find_tsc()` may have
+        # resolved an npx-provided compiler out of the caller's own
+        # node_modules; `npx --no-install` re-resolves per invocation from the
+        # cwd, so running here from a temp dir under /tmp would fail to find the
+        # very compiler just probed -- and npm's decoy `tsc` package answers
+        # with prose, not diagnostics, which reads exactly like a vacuous
+        # artifact. Explicit input files make tsc ignore any tsconfig.json here,
+        # so the caller's project cannot influence the result.
         # Mirror the artifact's own header: lib ES2015, and no `dom` -- lib.dom
         # declares `console` and `Plugin` too, and would answer for a .d.ts that
         # declares neither.
         result = subprocess.run(
             tsc + ["--noEmit", "--lib", "ES2015", "--types",
-                   "--strict", "false", str(dts), str(probe)],
-            capture_output=True, text=True, cwd=tmp)
+                   "--strict", "false", str(dts), str(probe.resolve())],
+            capture_output=True, text=True)
         output = result.stdout + result.stderr
 
     seen: dict[int, set[str]] = {}
@@ -135,6 +143,21 @@ def run(dts: Path, verbose: bool) -> int:
         if line not in {expected[0] for expected in EXPECTED}:
             unexpected.append(
                 f"probe.ts({line}): unrequested {'/'.join(sorted(seen[line]))}")
+
+    # A vacuous artifact is silent AND tsc is happy. Silence with a nonzero
+    # status means the compiler never got as far as judging the probe, so the
+    # subject was not examined at all -- report "could not run", never FAILED.
+    # Anything that fabricates a verdict without reading the artifact is the
+    # defect this file exists to catch, including in this file.
+    if not seen and result.returncode != 0:
+        print("typefloor: UNVERIFIED -- tsc produced no diagnostics and exited "
+              f"{result.returncode}.")
+        print(f"  the artifact at {dts} was NOT checked; this says nothing "
+              "about it.")
+        for raw in output.splitlines():
+            if raw.strip():
+                print(f"  | {raw.rstrip()}")
+        return 2
 
     if verbose:
         print(f"typefloor: tsc {version_text}")
