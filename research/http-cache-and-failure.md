@@ -236,7 +236,7 @@ inert (§3.3) — so this is a hazard, not an observed bug.
 | **HDRezka** | async error-first, exclusively | `caching`+`cacheTime`, 13 sites | error string via `cb(err)`; `noFail` on every request | yes — anti-bot re-attempt loop | `httpInspectorCreate` + Anubis proof-of-work; self-imposed pagination delay |
 | **trakt** | async error-first (API), **sync** in the auth path | `caching: true` ×4, **inert** | inverts the callback: `cb(json, pagination)` / `cb(null, null, err)` | yes — token refresh + device login inside the inspector | `httpInspectorCreate` on 401; **429 additive backoff** |
 | **anilibria** | async error-first | `caching`+`cacheTime`, per-endpoint TTLs | `callback(new Error(...))` | no — but DNS mirror failover | `httpInspectorCreate` for UA/Referer/`cf_clearance` |
-| **youtube** | async error-first | `caching: true` ×1 | `page.error(err)`, then `throw` | no | none — API key in query args |
+| **youtube** | async error-first | `caching: true` ×1 | `page.error(err)`, then `throw` | **yes — the whole OAuth device flow lives inside the inspector, gated on `ctrl.authFailed`, resuming with `ctrl.proceed()`** | `httpInspectorCreate` on 401 (`api.js:12-154`); a second inspector on the site host (`youtube.js:48`) |
 | **dailymotion** | both, chosen by argument | `caching: true`, toggled off by config | typed `SUCCESS`/`ERROR` union, `throwOnError` config | no | none |
 | **qobuz** | **sync**, throws | none | translates status to a specific `Error` | no | **429 named explicitly**; `httpInspectorCreate` for 401 |
 | **m7-jellyfin** | **sync** | none | `if (response.statuscode == 200)` and little else | no | none — token in header, no 401 path |
@@ -461,17 +461,21 @@ away.** No knowledge of `caching` appears anywhere in the repo.
   qualification in §2.2)* — HDRezka's third callback argument
   (`requestPipeline.js:112`, threaded through `rezka.js:31,50` into `pages/catalog.js:123`
   where it changes pagination timing), anilibria's `{data, cacheHit}` (`lib/api.js:135-138`).
-- **`io.httpInspectorCreate` is the answer to auth and to bot-defence** — trakt
-  `api.js:10`, HDRezka `utils/httpInspector.js`, anilibria `lib/api.js:30`, qobuz
-  `lib/inspector.js`. Four of nine, for three unrelated problems (OAuth 401, Anubis
-  cookies, Cloudflare impersonation). It is not in `movian/http.js` at all — it is on
+- **`io.httpInspectorCreate` is the answer to auth and to bot-defence** — youtube
+  `api.js:12` **and** `youtube.js:48`, trakt `api.js:10`, HDRezka
+  `utils/httpInspector.js`, anilibria `lib/api.js:30`, qobuz `lib/inspector.js`.
+  **Five of nine**, for three unrelated problems (OAuth 401, Anubis cookies, Cloudflare
+  impersonation). youtube is the origin of the OAuth-401 shape, not an omission from it:
+  trakt's `src/auth.js:9-133` is a near-verbatim copy (see
+  `research/youtube-as-intent.md:165-178`). It is not in `movian/http.js` at all — it is on
   `native/io`, and every one of them had to reach past the documented module to find it.
 
 **Diverged:**
 
-- **Sync vs async.** Async-only: HDRezka, anilibria, youtube. Sync-only: qobuz,
-  m7-jellyfin, tmdb, soap4.me. Both: trakt (async API, sync auth), dailymotion (one
-  function, chosen by argument). Four-five-ish, with no correlation to age, authoring
+- **Sync vs async.** Async-only: HDRezka, anilibria. Sync-only: qobuz, m7-jellyfin,
+  tmdb, soap4.me. Both: youtube (async API at `api.js:178,218`, **sync inside its OAuth
+  inspector** at `:38,65,96`), trakt (async API, sync auth — a copy of youtube's shape),
+  dailymotion (one function, chosen by argument). Four-five-ish, with no correlation to age, authoring
   style, or transpiler. [INFERRED] The API offers both with equal prominence
   (`movian/http.js:93-104`) and says nothing about which to prefer, so authors picked by
   taste. This is the largest unforced divergence in the survey.

@@ -354,8 +354,9 @@ adopt it. This is the clearest case in the whole reading where *intended* and
 ### 3.5 No transpile, no build, no tests
 
 [MEASURED] youtube's 14 `.js` files are hand-written ES5 with no build step, no
-`package.json`, no `use strict` and no tests. The map's convergence finding — four
-of nine built a transpile step — describes what people did *without* guidance. The
+`package.json`, no `use strict` and no tests. The map's convergence finding — three
+of nine built a transpile step (the ticket's "four" counted a `noEmit` type-check
+config as a build; see `research/repo-shape-and-build.md:32-42`) — describes what people did *without* guidance. The
 author, who needed none, wrote ES5 directly. [INFER] This is weak evidence about
 build tooling and strong evidence about *what the runtime is*: nothing in the
 intended use requires more than ES5.1.
@@ -395,8 +396,20 @@ youtube is entirely asynchronous — `api.js:178` is a three-argument
 neither is wrong. But the consequences differ:
 
 - soap4.me hand-rolls its own cache in a plain object (`src/index.js:81`,
-  `:93`, `:113`) because a synchronous fetch has nowhere to put a cache policy.
-  youtube sets `caching: true` and lets the core's HTTP cache do it (`api.js:174`).
+  `:93`, `:113`); youtube sets `caching: true` and lets the core's HTTP cache do it
+  (`api.js:174`). **The reason is not that a synchronous fetch has nowhere to put a
+  cache policy** — an earlier draft said so and it is wrong. `[CORE]` `es_io.c:313-314`
+  reads `caching` and `cacheTime` off the control object before anything branches, and
+  the sync/async split is `duk_is_function(ctx, 2)` at `:417` — the presence of a
+  callback, nothing else. Sync callers get the same cache.
+
+  What is structural is something else, and it does bite soap4.me: `es_io.c:414-415`
+  drops caching whenever the request carries **any** header other than `User-Agent`
+  (`disable_cache_on_http_headers`, `:145-154`) — unless `cacheTime` is also set, which
+  exempts it. Every soap4.me request sends `X-Api-Token` and `Accept-Encoding`
+  (`src/index.js:46-52`), so `caching: true` alone would have been silently inert there.
+  A hand-rolled cache is a reasonable response to that; `cacheTime` would have been the
+  cheaper one.
 - soap4.me has no pagination at all — every page renders its full result set.
   youtube paginates every list (`browse.js:261-275`).
 - soap4.me cannot show progressive loading; `page.loading` flips true then false

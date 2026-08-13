@@ -288,8 +288,10 @@ URL. Present in m7-jellyfin (`src/view.js:32-39`) and dailymotion
 raw — `theme.view:227` is `navOpen(URLPREFIX + $view.searchQuery)`, no escaping — and
 captures reach the handler **undecoded**: `es_route.c:236-240` pushes the raw byte range.
 So a query arrives with its spaces, colons, parens and non-ASCII intact. Write
-`:search:(.+)$` and decode nothing; `([^:]+)` there silently truncates every multi-word
-query and every `subject:x` link you emit yourself. Only dailymotion runs
+`:search:(.+)$` and decode nothing. `([^:]+)` there truncates silently, though **not on
+spaces** — a space is not a colon, so `two words` captures whole. What it loses is every
+`subject:x` link you emit yourself, which is the harder case to notice precisely because
+ordinary queries keep working. Only dailymotion runs
 `decodeURIComponent` on a capture, and it does so only on its own route — its Searcher
 path passes the query through undecoded, so the two disagree.
 
@@ -343,8 +345,9 @@ home-screen icon.
 `root.metadata = metadata` wholesale and deep-copies it into the prop tree. **There is no
 schema and no validation** — an unread key is silently inert.
 
-- **The floor is `title` + `icon`.** Every plugin in the corpus sets exactly those two at
-  minimum.
+- **For content and navigation items the floor is `title` + `icon`.** Every plugin in the
+  corpus sets exactly those two at minimum. Separators are the exception and take
+  `{title}` alone — they have their own stock view and no icon slot to fill.
 - The keys the flat skin actually reads, by frequency: `title`, `icon`, `duration`,
   `start`/`events`/`stop` (EPG), `episode`, `year`, `tagline`, `rating`, `glwview`,
   `description`, `backdrop(s)`, `artist`, `season`, `subtitle`, `synopsis`, `track`.
@@ -386,6 +389,14 @@ schema and no validation** — an unread key is silently inert.
   two live bindings. HDRezka is the only plugin that noticed the instability and adds a
   synthetic canonical binding (`utils/ui.js:27-33`, called from `pages/catalog.js:161`
   right after appending a `'video'` item) — which leaves it with both.
+
+  **`Item.unbindVideoMetadata` is not the escape hatch it looks like.** It exists
+  (`page.js:28-33`) and the natural reading is "unbind, then rebind on a stable URL".
+  `[CORE]` It only destroys `this.mlv`, the handle *`bindVideoMetadata`* stores — and
+  the automatic binding is a different mechanism: `page.js:292` calls
+  `bindPlayInfo(root, metabind_url)` and **discards the return value**, so JS never
+  holds it. On a freshly appended item `this.mlv` is `undefined` and the whole method
+  body is skipped. Calling it changes nothing; the two bindings stay.
 
 ## What actually renders, and clearing the spinner
 
@@ -482,9 +493,12 @@ the reverse — loads once, *then* assigns (`browse.js:274-275`) — so its firs
 pagination and a re-filter can reset the cursor without racing the paginator. Pick
 deliberately; both appear in the corpus.
 
-**What the example under-teaches, and every real plugin added:** a load mutex, a
-monotonic cancellation token, and a watchdog that releases the mutex if the fetch hangs
-(HDRezka `pages/catalog.js:26-27,68-69,115-126`; anilibria `lib/pagination.js:44-45,71-88`).
+**What the example under-teaches:** a load mutex, a monotonic cancellation token, and a
+watchdog that releases the mutex if the fetch hangs (HDRezka
+`pages/catalog.js:26-27,68-69,115-126`; anilibria `lib/pagination.js:44-45,71-88`).
+`[2/9]`, and both by the same author — so read this as one considered answer to a real
+hazard, not as something the corpus converged on. The other four `asyncPaginator` users
+ship without any of it.
 Prefer extracting that loop into a module with an injectable scheduler — `[COPIED]`, one
 author, but it is the only shape in the corpus that is unit-testable.
 

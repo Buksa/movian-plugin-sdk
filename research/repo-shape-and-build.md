@@ -92,10 +92,12 @@ sit at the repo root beside `plugin.json`, and pull siblings with relative
 `./src/log`, `./src/lookup`. qobuz: `qobuz.js:14-16` requires `lib/qobuz`,
 `lib/inspector`, `lib/bundle`. [READ]
 
-Three of the six carry a `tsconfig.json`, and in **all three it is
-`"noEmit": true`** — type-checking only, no output:
-`movian-plugin-HDRezka/tsconfig.json:9`, `movian-plugin-trakt/tsconfig.json:9`,
-and jellyfin's equivalent `m7-jellyfin/jsconfig.json:6`. [READ] A `tsconfig.json`
+**Two of these six** carry a `tsconfig.json` — `movian-plugin-HDRezka/tsconfig.json:9`
+and `movian-plugin-trakt/tsconfig.json:9` — and in both it is `"noEmit": true`,
+type-checking only, no output. A third config of the same kind sits outside this group:
+jellyfin's equivalent `m7-jellyfin/jsconfig.json:6`, which the table above classifies as
+one of the three real builds, so it is evidence for `noEmit` across the corpus but not
+for these six. Three of nine overall; two of the six no-build repos. [READ] A `tsconfig.json`
 in this corpus is **not** evidence of a build step. That is the trap that produced
 the ticket's "four transpilers" count.
 

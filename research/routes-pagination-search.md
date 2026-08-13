@@ -382,11 +382,12 @@ resume position are bound automatically for video items, keyed on the canonical 
   'imageset:' + JSON.stringify(item.snippet.thumbnails)`.
   It is also the only plugin that sets `root.subtype` on an item (`youtube.js:234`).
 
-### 1.6 qobuz — `require('movian/x')`, the only **synchronous `paginator`**
+### 1.6 qobuz — `require('movian/x')`, the only **correct synchronous `paginator`**
 
 - **Routes.** Five, `qobuz.js:288,321,345,369,399`; single positional capture each.
-- **Pagination.** The **only** use of the synchronous `page.paginator` contract in the
-  live corpus. `qobuz.js:243-265` `makePaginator(fetch)` returns a closure over
+- **Pagination.** The only **correct** use of the synchronous `page.paginator` contract
+  in the live corpus — the cross-corpus table below counts **2/9**, qobuz and tmdb, and
+  tmdb's is live but drains its whole result set on the first call. `qobuz.js:243-265` `makePaginator(fetch)` returns a closure over
   `offset`/`total`/`PAGE_SIZE = 50` that **returns a boolean**; `qobuz.js:272-282`
   `installPaginator` loads the first block eagerly and then either sets
   `pageObj.paginator = loadMore` (`:279`) or `pageObj.haveMore(false)` (`:281`).
