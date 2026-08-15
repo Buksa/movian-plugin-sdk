@@ -69,6 +69,20 @@ claude plugin validate .
 
 The warning about a missing `version` is expected.
 
+## `tests/`
+
+Checks for the `install.sh` channel — the parts that are run rather than read.
+Not installed; run from the checkout.
+
+```
+python3 tests/typefloor_selftest.py --dts "$(mdev core)/generated/movian-api.d.ts"
+```
+
+It needs a core whose artifact currently passes, and says so if given one that
+does not. Anything added here should be able to **fail** for a stated reason:
+this suite exists because `mdev types` now makes a claim about the core's
+artifact, and a claim nothing can falsify is the bug it was written to prevent.
+
 ## `salvage/`
 
 Staging for content rescued from untracked machine state. It sits outside

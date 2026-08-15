@@ -35,11 +35,18 @@ native/string  native/subtitle  native/websocket
 Use it to answer "does this module/export exist" definitively. Its **signatures
 are weak** — many members are typed `any` — so it settles existence, not shape.
 
-Verify it is current before trusting it:
+Two different questions decide whether to trust it, and neither answers the other:
 
 ```
-(cd "$(mdev core)" && python3 support/devtools/metadata/gen.py --check)
+(cd "$(mdev core)" && python3 support/devtools/metadata/gen.py --check)   # consistent with the source beside it?
+mdev types                                                               # still catches anything?
 ```
+
+`--check` regenerates and diffs, so it catches an artifact nobody regenerated. It
+cannot see a checkout that is simply **old** — there the artifact matches its own
+sources perfectly and `--check` exits 0 while the declarations that do the
+checking are absent. That is what `typefloor` in `mdev types` is for; see *Type
+checking a plugin* below.
 
 **2. Prose reference — `$(mdev core)/docs/Guides/PLUGIN_API_REFERENCE.md`**
 
@@ -55,10 +62,12 @@ reads to its own directory — relevant whenever a plugin reads outside itself).
 
 **3. Runnable examples — `$(mdev core)/plugin_examples/`**
 
-Eight small working plugins: `async_page_load`, `itemhook`, `listx_cloner`,
-`music`, `settings`, `subscriptions`, `videoscrobbling`, `webpopupplugin`. When
-the question is "what does the idiomatic call sequence look like", these beat
-prose.
+Twenty small working plugins, all of which the core compiles on every run
+(movian#175). Eight at the top level — `async_page_load`, `itemhook`,
+`listx_cloner`, `music`, `settings`, `subscriptions`, `videoscrobbling`,
+`webpopupplugin` — plus twelve graded ones under `01-basic/`, `02-intermediate/`
+and `03-advanced/`, from `01-hello-world` to `02-oauth-authentication`. When the
+question is "what does the idiomatic call sequence look like", these beat prose.
 
 ## The language constraint that catches people
 
@@ -76,12 +85,41 @@ echo 'types/movian-api.d.ts' >> .gitignore
 
 Then include `types/**/*.d.ts` in `tsconfig.json`. Never put the core's absolute
 path in a committed `tsconfig` — `mdev types` exists so the config can name a
-stable relative path. The symlink cannot go stale as the core is rebuilt; `mdev
-types --copy` vendors a snapshot instead, for a repo that must typecheck without
-a core checkout.
+stable relative path. `mdev types --copy` vendors a snapshot instead, for a repo
+that must typecheck without a core checkout.
 
 Measured on `movian-plugin-trakt`: `tsc` could not resolve a single Movian
 module before, and resolves all of them after.
+
+### A green `tsc` is a claim, and `mdev types` now checks it
+
+The symlink tracks the core, but **the core itself can be old**, and then the
+declarations you compile against are permanently behind the ones that do the
+checking. This is not hypothetical (movian#183): a session built a plugin against
+a checkout that predated movian#171, #172, #176 and #178, got a clean `tsc`, and
+every one of
+
+```js
+page.searchable = true;   item.onSelect = f;   page.appendItm(...)
+```
+
+passed — the three defects the core had just been changed to catch. Nothing in
+the checkout dissented: `gen.py --check` was green, and so were all six of `mdev
+lsp doctor`'s checks. They ask the checkout about itself, and a merely-old
+checkout answers all of them correctly.
+
+So `mdev types` compiles a probe that is **wrong on purpose** against the file it
+just handed you, and reports whether the artifact says so:
+
+```
+typefloor: OK -- 3 planted defects all reported (tsc Version 5.7.3)
+```
+
+If instead it prints `FAILED`, the artifact is not checking your plugin, and a
+green run against it means nothing. Read which core you are on
+(`mdev doctor` prints the branch and how far behind), then regenerate or repoint.
+`mdev doctor` runs the same check. `--no-verify` skips it; there is deliberately
+no quiet fallback, because "could not check" must not read like "checked, fine".
 
 **Three limits worth knowing before you trust a result:**
 

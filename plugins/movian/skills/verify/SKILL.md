@@ -113,7 +113,7 @@ effort.
 
 | | evidence | proves | does not prove |
 |---|---|---|---|
-| **L0** static | `node --check`, `tsc --noEmit` against `mdev types`, `git diff --check` | the file parses; the modules and members it names exist | that a single line runs |
+| **L0** static | `node --check`, `tsc --noEmit` against `mdev types`, `git diff --check` | the file parses; the modules and members it names exist — *if* `mdev types` reported `typefloor: OK` | that a single line runs |
 | **L1** loads | the plugin appears in the log with no load-time error | manifest and entry point are valid | that any route works |
 | **L2** route | `mdev open <url>` reaches page-ready | navigation reached your handler and it returned | that the page holds the right thing |
 | **L3** state | `mdev props` shows the specific values under test | the change's effect on the model | that any of it is visible |
@@ -122,6 +122,13 @@ effort.
 **A lower level passing never implies a higher one. A higher level passing does
 imply the lower ones** — you cannot render a route you failed to load. So verify
 at the highest level your change can reach, and say which level you reached.
+
+L0 is the one rung whose *instrument* can be silently empty. A `.d.ts` generated
+by a core checkout older than the declarations produces a clean `tsc` on code
+that names members which do not exist (movian#183). `mdev types` and `mdev
+doctor` now compile a deliberately-wrong probe against it and print
+`typefloor: OK` or `FAILED`. A green `tsc` reported without that line is an
+unverified claim, not L0.
 
 Playback is not a sixth rung; it is a **sub-ladder inside L3–L4** —
 `routed` → `probed` → `decoded` → `rendered`, each proving only its own layer
