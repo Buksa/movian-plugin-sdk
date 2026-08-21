@@ -1,0 +1,7 @@
+# Python bytecode. Two .pyc files were tracked before this file existed, one of
+# them the compiled form of lib/typefloor.py -- so the repository carried a
+# stale copy of the module whose whole defect had been that it reported a
+# verdict the compiler never produced. Bytecode is a build product of whichever
+# interpreter happens to run; it does not belong in version control.
+__pycache__/
+*.py[cod]
