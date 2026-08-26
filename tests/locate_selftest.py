@@ -30,6 +30,19 @@ LOCATE = HERE.parent / "lib" / "locate.sh"
 _CEILING = ""
 
 
+def _git_local_env_vars() -> list[str]:
+    """git's own list of the variables that select a repository."""
+    done = subprocess.run(["git", "rev-parse", "--local-env-vars"],
+                          capture_output=True, text=True)
+    return done.stdout.split() if done.returncode == 0 else [
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY"]
+
+
+_GIT_LOCAL_ENV = _git_local_env_vars()
+# Fixtures build_cases() creates that later checks reuse.
+FIXTURES: dict[str, Path] = {}
+
+
 def locate(root: str | None, config: str | None = None,
            extra_env: dict[str, str] | None = None) -> tuple[int, str]:
     """Run `movian_sdk_locate` and return its exit code and stderr.
@@ -39,6 +52,12 @@ def locate(root: str | None, config: str | None = None,
     """
     env = dict(os.environ)
     env.pop("MOVIAN_CORE", None)
+    # Repository selection from the caller's environment would classify the
+    # fixtures by whatever repo the developer happens to be in. locate.sh
+    # clears these itself now; the harness must not depend on that to be
+    # testing what it thinks it is.
+    for name in _GIT_LOCAL_ENV:
+        env.pop(name, None)
     if root is not None:
         env["MOVIAN_CORE"] = root
     env["MOVIAN_SDK_CONFIG"] = config if config else "/nonexistent/config.json"
@@ -99,6 +118,34 @@ def movian_checkout(root: Path, *, with_mdev: bool) -> None:
     git(root, "commit", "-q", "-m", "a revision")
 
 
+def _git_out(root: Path, *args: str) -> str:
+    done = subprocess.run(["git", "-C", str(root), *args],
+                          capture_output=True, text=True,
+                          env={**os.environ,
+                               "GIT_CONFIG_GLOBAL": os.devnull,
+                               "GIT_CONFIG_SYSTEM": os.devnull})
+    return done.stdout
+
+
+def _printed_fix(message: str) -> str | None:
+    """The `fix:` command out of a diagnosis, joined across its backslash.
+
+    Read from the message rather than retyped, so the test exercises what a
+    reader would actually paste.
+    """
+    lines = message.splitlines()
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith("fix: cd "):
+            continue
+        command = stripped[len("fix: "):]
+        while command.endswith("\\") and index + 1 < len(lines):
+            index += 1
+            command = command[:-1] + " " + lines[index].strip()
+        return command
+    return None
+
+
 def build_cases(tmp: Path) -> list[tuple[str, str, list[str], list[str]]]:
     """(label, root, must appear in stderr, must NOT appear)."""
     unrelated = tmp / "unrelated"
@@ -127,13 +174,16 @@ def build_cases(tmp: Path) -> list[tuple[str, str, list[str], list[str]]]:
     git(cproject, "add", "-A")
     git(cproject, "commit", "-q", "-m", "a C project")
 
-    # HEAD carries `mdev`; the working-tree copy does not. A sparse checkout
-    # that excludes support/ produces the same thing, and "update this
-    # checkout" would do nothing.
+    # HEAD carries `mdev` and the working tree does not. Three ways that
+    # happens, and the fixture used to be only the first -- so the
+    # `--ignore-skip-worktree-bits` path the message advertises was never
+    # once executed by this suite.
     sparse = tmp / "sparse"
     sparse.mkdir()
     movian_checkout(sparse, with_mdev=True)
-    (sparse / "support" / "devtools" / "mdev").unlink()
+    git(sparse, "sparse-checkout", "init", "--cone")
+    git(sparse, "sparse-checkout", "set", "src")
+    FIXTURES["sparse"] = sparse
 
     complete = tmp / "complete"
     (complete / "support" / "devtools").mkdir(parents=True)
@@ -227,20 +277,66 @@ def main() -> int:
         else:
             print("  ok   an exported GIT_DIR does not redirect the probe")
 
-        # `git rm --cached` leaves HEAD carrying the file and the index not,
-        # and a pathspec is read from the index.
+        # The printed remedy is run, not read. Three ways the file goes
+        # missing, and the message must carry one command that restores all
+        # three -- asserting the wording only proves the wording.
+        deleted = tmp / "deleted"
+        deleted.mkdir()
+        movian_checkout(deleted, with_mdev=True)
+        (deleted / "support" / "devtools" / "mdev").unlink()
+
         staged = tmp / "staged"
         staged.mkdir()
         movian_checkout(staged, with_mdev=True)
         git(staged, "rm", "-q", "--cached", "support/devtools/mdev")
         (staged / "support" / "devtools" / "mdev").unlink()
-        code, err = locate(str(staged))
-        if code == 0 or "checkout HEAD" not in err:
-            print("  FAIL a staged deletion is not offered a working fix: "
-                  + err.strip())
-            failures += 1
-        else:
-            print("  ok   the restore command names HEAD, not the index")
+
+        # Each fixture asserts the state it claims to be in first. Without
+        # this the sparse case degraded into a second ordinary deletion and
+        # the suite still passed -- proving the remedy against a condition
+        # that was never created is the failure this suite is about.
+        preconditions = {
+            "a staged deletion":
+                lambda root: "support/devtools/mdev" in _git_out(
+                    root, "diff", "--cached", "--name-only", "--diff-filter=D"),
+            "a sparse-checkout exclusion":
+                lambda root: any(
+                    line.startswith("S ") and line.endswith("support/devtools/mdev")
+                    for line in _git_out(root, "ls-files", "-t").splitlines()),
+        }
+
+        for label, where in (("an ordinary deletion", deleted),
+                             ("a staged deletion", staged),
+                             ("a sparse-checkout exclusion",
+                              FIXTURES["sparse"])):
+            check = preconditions.get(label)
+            if check is not None and not check(where):
+                print(f"  FAIL {label}: the fixture is not in that state")
+                failures += 1
+                continue
+            code, err = locate(str(where))
+            if code == 0 or "revision DOES carry it" not in err:
+                print(f"  FAIL {label}: not diagnosed -- {err.strip()}")
+                failures += 1
+                continue
+            command = _printed_fix(err)
+            if command is None:
+                print(f"  FAIL {label}: no runnable fix in the message")
+                failures += 1
+                continue
+            run = subprocess.run(["bash", "-c", command], cwd=str(where),
+                                 capture_output=True, text=True,
+                                 env={**os.environ,
+                                      "GIT_CONFIG_GLOBAL": os.devnull,
+                                      "GIT_CONFIG_SYSTEM": os.devnull})
+            restored = (where / "support" / "devtools" / "mdev").exists()
+            if not restored:
+                print(f"  FAIL {label}: the printed fix did not restore it")
+                print(f"       $ {command}")
+                print("       " + (run.stderr.strip() or "(no stderr)"))
+                failures += 1
+            else:
+                print(f"  ok   the printed fix restores {label}")
 
         # The installer refuses before the shim exists, so it needs the same
         # diagnosis or a new user never sees it.
@@ -280,7 +376,7 @@ def main() -> int:
     if failures:
         print(f"selftest: FAILED ({failures} case(s) not diagnosed distinctly)")
         return 1
-    print("selftest: OK -- 13 cases, each naming its own cause")
+    print("selftest: OK -- 15 cases, each naming its own cause")
     return 0
 
 

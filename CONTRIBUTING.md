@@ -80,8 +80,11 @@ python3 tests/locate_selftest.py
 ```
 
 The first needs a core whose artifact currently passes, and says so if given one
-that does not. The second needs nothing: it builds each kind of broken core on
-disk and requires the locator to name that cause and not another's. Anything added here should be able to **fail** for a stated reason:
+that does not. The second needs **no Movian core and no SDK configuration** —
+it builds each kind of broken core on disk, requires the locator to name that
+cause and not another's, and then RUNS the fix each message prints to check it
+actually works. It does need `git`, `bash` and Python on PATH, and it writes
+synthetic repositories under `TMPDIR`. Anything added here should be able to **fail** for a stated reason:
 this suite exists because `mdev types` now makes a claim about the core's
 artifact, and a claim nothing can falsify is the bug it was written to prevent.
 

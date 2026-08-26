@@ -63,13 +63,15 @@ Every failure names the offending path and the fix. The common ones:
 
 - **"no Movian core configured"** — neither `MOVIAN_CORE` nor the config file is
   set. Create `~/.config/movian-sdk/config.json` with the core path.
-- **"has no support/devtools/mdev"** — four different causes, and the second
+- **"has no support/devtools/mdev"** — five different causes, and the second
   line of the message says which. Read it rather than assuming the path is
   wrong:
-  - *"not of Movian"* or no second line — the path really is not a Movian
-    checkout. The markers are `support/configure.inc` and `src/prop/prop.h`
-    in HEAD, together: a bare C project with `src/main.c` is not enough.
-    Point somewhere else.
+  - **no second line at all** — the path is not a git work tree, so there was
+    nothing further to read. Point somewhere else.
+  - *"it is a git checkout, but not of Movian"* — it is version-controlled and
+    is some other project. The markers are `support/configure.inc` **and**
+    `src/prop/prop.h` in HEAD, together: a bare C project with `src/main.c`
+    is not enough, and neither marker alone is. Point somewhere else.
   - *"it IS a Movian checkout — on `<branch>` @ `<sha>`, a revision without
     it"* — the path is right and the **revision** is old. Update that checkout,
     or point at one whose revision carries `support/devtools/mdev`.
