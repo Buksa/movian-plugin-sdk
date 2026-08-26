@@ -32,17 +32,38 @@ movian_sdk_explain_missing_mdev() {
     return
   fi
 
+  # Being a git work tree is not evidence of being THIS project, and plenty of
+  # unrelated directories are version-controlled. Without this the previously
+  # correct "unrelated directory" verdict regressed into advice to update a
+  # repository that was never Movian.
+  if ! git -C "$root" cat-file -e HEAD:src/main.c 2>/dev/null &&
+     ! git -C "$root" cat-file -e HEAD:support/configure.inc 2>/dev/null; then
+    echo "  it is a git checkout, but not of Movian -- no src/main.c in HEAD." >&2
+    echo "  fix: point at a Movian checkout, not an unrelated directory." >&2
+    return
+  fi
+
   # `git -C` answers for the enclosing tree, so a path INSIDE a checkout
   # resolves happily and is a different mistake with a different fix.
   if [ "$top" != "$(cd "$root" && pwd -P)" ]; then
-    echo "  that path is inside the checkout at '$top', not its root." >&2
+    echo "  that path is inside the Movian checkout at '$top', not its root." >&2
     echo "  fix: point at '$top'." >&2
+    return
+  fi
+
+  # The revision is only to blame when the revision really lacks it. A sparse
+  # checkout, or a deleted file, leaves HEAD carrying `mdev` while the working
+  # tree does not -- and "update this checkout" would do nothing at all.
+  if git -C "$root" cat-file -e HEAD:support/devtools/mdev 2>/dev/null; then
+    echo "  this revision DOES carry it -- the working-tree copy is missing." >&2
+    echo "  fix: cd '$root' && git checkout -- support/devtools/mdev" >&2
+    echo "  (a sparse checkout that excludes support/ produces this too.)" >&2
     return
   fi
 
   head="$(git -C "$root" rev-parse --short HEAD 2>/dev/null)" || head="an unborn HEAD"
   branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch="HEAD"
-  echo "  it IS a git checkout -- on $branch @ $head, a revision that does not carry it." >&2
+  echo "  it IS a Movian checkout -- on $branch @ $head, a revision without it." >&2
   echo "  fix: update this checkout, or point at one whose revision has support/devtools/mdev." >&2
 }
 

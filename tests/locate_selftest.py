@@ -48,11 +48,40 @@ def locate(root: str | None, config: str | None = None) -> tuple[int, str]:
 
 
 def git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), *args], check=True,
-                   capture_output=True,
+    """Run git with the developer's own configuration kept out of it.
+
+    Commit signing, `core.hooksPath` and templates are all global settings
+    that make a synthetic commit fail or behave differently, and this suite is
+    documented as needing no setup. `GIT_CONFIG_GLOBAL`/`_SYSTEM` pointed at
+    /dev/null is the supported way to say "none of that".
+    """
+    subprocess.run(["git", "-C", str(root), "-c", "commit.gpgsign=false",
+                    "-c", "core.hooksPath=/dev/null", *args],
+                   check=True, capture_output=True,
                    env={**os.environ,
+                        "GIT_CONFIG_GLOBAL": os.devnull,
+                        "GIT_CONFIG_SYSTEM": os.devnull,
                         "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
                         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+
+
+def movian_checkout(root: Path, *, with_mdev: bool) -> None:
+    """A git checkout that looks like this project.
+
+    `src/main.c` is the marker the locator uses: being a work tree says
+    nothing about being Movian, and plenty of unrelated directories are
+    version-controlled.
+    """
+    (root / "src").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "main.c").write_text("int main(void){return 0;}\n",
+                                         encoding="utf-8")
+    (root / "support" / "devtools").mkdir(parents=True, exist_ok=True)
+    if with_mdev:
+        (root / "support" / "devtools" / "mdev").write_text("#!/bin/sh\n",
+                                                            encoding="utf-8")
+    git(root, "init", "-q", ".")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "a revision")
 
 
 def build_cases(tmp: Path) -> list[tuple[str, str, list[str], list[str]]]:
@@ -61,11 +90,25 @@ def build_cases(tmp: Path) -> list[tuple[str, str, list[str], list[str]]]:
     unrelated.mkdir()
 
     checkout = tmp / "checkout"
-    (checkout / "support" / "devtools").mkdir(parents=True)
-    (checkout / "src").mkdir()
-    git(checkout, "init", "-q", ".")
-    git(checkout, "commit", "-q", "--allow-empty", "-m", "old revision")
+    checkout.mkdir()
+    movian_checkout(checkout, with_mdev=False)
     git(checkout, "checkout", "-q", "-b", "wsd-test")
+
+    # A git repository that is not this project. Being version-controlled is
+    # no evidence at all, and treating it as such regressed the one verdict
+    # that used to be right.
+    foreign = tmp / "foreign"
+    foreign.mkdir()
+    git(foreign, "init", "-q", ".")
+    git(foreign, "commit", "-q", "--allow-empty", "-m", "not movian")
+
+    # HEAD carries `mdev`; the working-tree copy does not. A sparse checkout
+    # that excludes support/ produces the same thing, and "update this
+    # checkout" would do nothing.
+    sparse = tmp / "sparse"
+    sparse.mkdir()
+    movian_checkout(sparse, with_mdev=True)
+    (sparse / "support" / "devtools" / "mdev").unlink()
 
     complete = tmp / "complete"
     (complete / "support" / "devtools").mkdir(parents=True)
@@ -84,24 +127,34 @@ def build_cases(tmp: Path) -> list[tuple[str, str, list[str], list[str]]]:
         ("a path that is not a directory",
          str(tmp / "does-not-exist"),
          ["is not a directory"],
-         ["unrelated directory", "IS a git checkout", "inside the checkout"]),
+         ["unrelated directory", "IS a Movian checkout", "inside the"]),
         ("an unrelated directory",
          str(unrelated),
          ["has no support/devtools/mdev", "unrelated directory"],
-         ["IS a git checkout", "inside the checkout"]),
+         ["IS a Movian checkout", "inside the", "not of Movian"]),
         ("a checkout on a revision without mdev",
          str(checkout),
-         ["has no support/devtools/mdev", "IS a git checkout", "wsd-test",
+         ["has no support/devtools/mdev", "IS a Movian checkout", "wsd-test",
           "update this checkout"],
-         ["unrelated directory", "inside the checkout"]),
+         ["unrelated directory", "inside the Movian checkout",
+          "revision DOES carry it", "not of Movian"]),
         ("a path inside a checkout rather than its root",
          str(checkout / "src"),
-         ["inside the checkout at", str(checkout)],
-         ["unrelated directory", "IS a git checkout"]),
+         ["inside the Movian checkout at", str(checkout)],
+         ["unrelated directory", "IS a Movian checkout"]),
+        ("a git repository that is not this project",
+         str(foreign),
+         ["not of Movian", "unrelated directory"],
+         ["IS a Movian checkout", "update this checkout",
+          "revision DOES carry it"]),
+        ("a checkout whose HEAD has mdev but the file is gone",
+         str(sparse),
+         ["revision DOES carry it", "git checkout --", "sparse checkout"],
+         ["unrelated directory", "a revision without it"]),
         ("a checkout with mdev but no built binary",
          str(complete),
          ["no executable build.debug/movian", "configure-linux-debug.sh"],
-         ["unrelated directory", "IS a git checkout"]),
+         ["unrelated directory", "IS a Movian checkout"]),
     ]
 
 
@@ -150,7 +203,7 @@ def main() -> int:
     if failures:
         print(f"selftest: FAILED ({failures} case(s) not diagnosed distinctly)")
         return 1
-    print("selftest: OK -- 7 cases, each naming its own cause")
+    print("selftest: OK -- 9 cases, each naming its own cause")
     return 0
 
 

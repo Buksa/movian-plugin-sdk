@@ -63,7 +63,19 @@ Every failure names the offending path and the fix. The common ones:
 
 - **"no Movian core configured"** — neither `MOVIAN_CORE` nor the config file is
   set. Create `~/.config/movian-sdk/config.json` with the core path.
-- **"has no support/devtools/mdev"** — the path is not a Movian checkout.
+- **"has no support/devtools/mdev"** — four different causes, and the second
+  line of the message says which. Read it rather than assuming the path is
+  wrong:
+  - *"not of Movian"* or no second line — the path really is not a Movian
+    checkout. Point somewhere else.
+  - *"it IS a Movian checkout — on `<branch>` @ `<sha>`, a revision without
+    it"* — the path is right and the **revision** is old. Update that checkout,
+    or point at one whose revision carries `support/devtools/mdev`.
+  - *"this revision DOES carry it — the working-tree copy is missing"* — a
+    deleted file, or a sparse checkout that excludes `support/`. Restore it
+    with `git checkout -- support/devtools/mdev`; updating would do nothing.
+  - *"that path is inside the Movian checkout at `<root>`"* — you pointed into
+    the tree instead of at it. Point at `<root>`.
 - **"has no executable build.debug/movian"** — the core is not built. Build it
   **from the checkout that owns its `build.debug`**:
 
