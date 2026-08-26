@@ -33,12 +33,19 @@ movian_sdk_explain_missing_mdev() {
   fi
 
   # Being a git work tree is not evidence of being THIS project, and plenty of
-  # unrelated directories are version-controlled. Without this the previously
-  # correct "unrelated directory" verdict regressed into advice to update a
-  # repository that was never Movian.
-  if ! git -C "$root" cat-file -e HEAD:src/main.c 2>/dev/null &&
-     ! git -C "$root" cat-file -e HEAD:support/configure.inc 2>/dev/null; then
-    echo "  it is a git checkout, but not of Movian -- no src/main.c in HEAD." >&2
+  # unrelated directories are version-controlled. Nor is `src/main.c`, which
+  # any C project may have -- accepting either marker alone called a bare C
+  # repository a Movian checkout on an old revision.
+  #
+  # Both of these together are specific: `configure.inc` is this build system
+  # and `prop.h` is this property system, and no unrelated project carries the
+  # pair. Verified present in HEAD of both the oldest branch here (M7-272) and
+  # movian6. A revision so old it lacks them falls back to the
+  # unrelated-directory message, which is the conservative direction.
+  if ! git -C "$root" cat-file -e HEAD:support/configure.inc 2>/dev/null ||
+     ! git -C "$root" cat-file -e HEAD:src/prop/prop.h 2>/dev/null; then
+    echo "  it is a git checkout, but not of Movian -- HEAD has no" >&2
+    echo "  support/configure.inc + src/prop/prop.h." >&2
     echo "  fix: point at a Movian checkout, not an unrelated directory." >&2
     return
   fi
@@ -56,8 +63,14 @@ movian_sdk_explain_missing_mdev() {
   # tree does not -- and "update this checkout" would do nothing at all.
   if git -C "$root" cat-file -e HEAD:support/devtools/mdev 2>/dev/null; then
     echo "  this revision DOES carry it -- the working-tree copy is missing." >&2
-    echo "  fix: cd '$root' && git checkout -- support/devtools/mdev" >&2
-    echo "  (a sparse checkout that excludes support/ produces this too.)" >&2
+    # A sparse checkout that excludes support/ produces this, and there the
+    # plain form fails with "pathspec ... did not match any file(s) known to
+    # git" and restores nothing. `--ignore-skip-worktree-bits` covers that
+    # case and an ordinary deleted file alike -- both verified.
+    echo "  fix: cd '$root' &&" >&2
+    echo "       git checkout --ignore-skip-worktree-bits -- support/devtools/mdev" >&2
+    echo "  (if support/ is excluded by sparse-checkout, widen the patterns" >&2
+    echo "   too, or the next checkout drops it again.)" >&2
     return
   fi
 

@@ -67,13 +67,18 @@ Every failure names the offending path and the fix. The common ones:
   line of the message says which. Read it rather than assuming the path is
   wrong:
   - *"not of Movian"* or no second line — the path really is not a Movian
-    checkout. Point somewhere else.
+    checkout. The markers are `support/configure.inc` and `src/prop/prop.h`
+    in HEAD, together: a bare C project with `src/main.c` is not enough.
+    Point somewhere else.
   - *"it IS a Movian checkout — on `<branch>` @ `<sha>`, a revision without
     it"* — the path is right and the **revision** is old. Update that checkout,
     or point at one whose revision carries `support/devtools/mdev`.
   - *"this revision DOES carry it — the working-tree copy is missing"* — a
     deleted file, or a sparse checkout that excludes `support/`. Restore it
-    with `git checkout -- support/devtools/mdev`; updating would do nothing.
+    with `git checkout --ignore-skip-worktree-bits -- support/devtools/mdev`;
+    the plain form fails outright when sparse-checkout excludes the path, and
+    updating the checkout would do nothing either way. If sparse-checkout is
+    the cause, widen the patterns too or the next checkout drops it again.
   - *"that path is inside the Movian checkout at `<root>`"* — you pointed into
     the tree instead of at it. Point at `<root>`.
 - **"has no executable build.debug/movian"** — the core is not built. Build it

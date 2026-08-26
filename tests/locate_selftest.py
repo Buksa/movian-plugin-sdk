@@ -27,6 +27,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 LOCATE = HERE.parent / "lib" / "locate.sh"
+_CEILING = ""
 
 
 def locate(root: str | None, config: str | None = None) -> tuple[int, str]:
@@ -40,6 +41,12 @@ def locate(root: str | None, config: str | None = None) -> tuple[int, str]:
     if root is not None:
         env["MOVIAN_CORE"] = root
     env["MOVIAN_SDK_CONFIG"] = config if config else "/nonexistent/config.json"
+    if _CEILING:
+        # TMPDIR may itself sit inside a git worktree, and git walks upward:
+        # the "unrelated directory" fixture would then be classified by the
+        # enclosing repository and the case would fail for a reason that has
+        # nothing to do with the locator.
+        env["GIT_CEILING_DIRECTORIES"] = _CEILING
     done = subprocess.run(
         ["bash", "-c", '. "$1"; movian_sdk_locate', "_", str(LOCATE)],
         capture_output=True, text=True, env=env,
@@ -72,10 +79,16 @@ def movian_checkout(root: Path, *, with_mdev: bool) -> None:
     nothing about being Movian, and plenty of unrelated directories are
     version-controlled.
     """
-    (root / "src").mkdir(parents=True, exist_ok=True)
+    # The markers the locator requires: this build system and this property
+    # system, together. Either alone is something any C project may have.
+    (root / "src" / "prop").mkdir(parents=True, exist_ok=True)
     (root / "src" / "main.c").write_text("int main(void){return 0;}\n",
                                          encoding="utf-8")
+    (root / "src" / "prop" / "prop.h").write_text("/* prop */\n",
+                                                  encoding="utf-8")
     (root / "support" / "devtools").mkdir(parents=True, exist_ok=True)
+    (root / "support" / "configure.inc").write_text("# configure\n",
+                                                    encoding="utf-8")
     if with_mdev:
         (root / "support" / "devtools" / "mdev").write_text("#!/bin/sh\n",
                                                             encoding="utf-8")
@@ -101,6 +114,16 @@ def build_cases(tmp: Path) -> list[tuple[str, str, list[str], list[str]]]:
     foreign.mkdir()
     git(foreign, "init", "-q", ".")
     git(foreign, "commit", "-q", "--allow-empty", "-m", "not movian")
+
+    # A C project with the conventional `src/main.c` and nothing else of
+    # this one. Accepting either marker alone called this a Movian checkout.
+    cproject = tmp / "cproject"
+    (cproject / "src").mkdir(parents=True)
+    (cproject / "src" / "main.c").write_text("int main(void){return 0;}\n",
+                                             encoding="utf-8")
+    git(cproject, "init", "-q", ".")
+    git(cproject, "add", "-A")
+    git(cproject, "commit", "-q", "-m", "a C project")
 
     # HEAD carries `mdev`; the working-tree copy does not. A sparse checkout
     # that excludes support/ produces the same thing, and "update this
@@ -149,8 +172,13 @@ def build_cases(tmp: Path) -> list[tuple[str, str, list[str], list[str]]]:
           "revision DOES carry it"]),
         ("a checkout whose HEAD has mdev but the file is gone",
          str(sparse),
-         ["revision DOES carry it", "git checkout --", "sparse checkout"],
+         ["revision DOES carry it", "--ignore-skip-worktree-bits",
+          "sparse-checkout"],
          ["unrelated directory", "a revision without it"]),
+        ("a C project that merely has src/main.c",
+         str(cproject),
+         ["not of Movian", "unrelated directory"],
+         ["IS a Movian checkout", "update this checkout"]),
         ("a checkout with mdev but no built binary",
          str(complete),
          ["no executable build.debug/movian", "configure-linux-debug.sh"],
@@ -159,9 +187,11 @@ def build_cases(tmp: Path) -> list[tuple[str, str, list[str], list[str]]]:
 
 
 def main() -> int:
+    global _CEILING
     failures = 0
     with tempfile.TemporaryDirectory() as directory:
         tmp = Path(directory)
+        _CEILING = str(tmp)
 
         for label, root, expected, forbidden in build_cases(tmp):
             code, err = locate(root)
@@ -203,7 +233,7 @@ def main() -> int:
     if failures:
         print(f"selftest: FAILED ({failures} case(s) not diagnosed distinctly)")
         return 1
-    print("selftest: OK -- 9 cases, each naming its own cause")
+    print("selftest: OK -- 10 cases, each naming its own cause")
     return 0
 
 
