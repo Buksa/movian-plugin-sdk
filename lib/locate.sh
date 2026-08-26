@@ -12,6 +12,22 @@
 
 MOVIAN_SDK_CONFIG="${MOVIAN_SDK_CONFIG:-$HOME/.config/movian-sdk/config.json}"
 
+# Git reads the repository to work on from the environment before it looks at
+# `-C`, so `GIT_DIR` exported by a hook or a wrapping tool silently redirects
+# these probes at the CALLER's repository. Measured: under `GIT_DIR=<sdk>/.git`,
+# `git -C <target> cat-file -e HEAD:lib/locate.sh` succeeds, and that file
+# exists only in the SDK. `git rev-parse --local-env-vars` is git's own list of
+# the variables that do this.
+movian_sdk_git() {
+  local root="$1"
+  shift
+  (
+    unset $(git rev-parse --local-env-vars 2>/dev/null) 2>/dev/null || true
+    git -C "$root" "$@"
+  )
+}
+
+
 # Why `support/devtools/mdev` is absent. Three causes, and only one of them is
 # "you pointed at the wrong kind of directory" -- which is what this used to
 # say about all three. A designated core sitting on a revision that predates
@@ -27,7 +43,7 @@ movian_sdk_explain_missing_mdev() {
   local root="$1" top head branch
 
   if ! command -v git >/dev/null 2>&1 ||
-     ! top="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)"; then
+     ! top="$(movian_sdk_git "$root" rev-parse --show-toplevel 2>/dev/null)"; then
     echo "  fix: point at a Movian checkout, not an unrelated directory." >&2
     return
   fi
@@ -42,8 +58,8 @@ movian_sdk_explain_missing_mdev() {
   # pair. Verified present in HEAD of both the oldest branch here (M7-272) and
   # movian6. A revision so old it lacks them falls back to the
   # unrelated-directory message, which is the conservative direction.
-  if ! git -C "$root" cat-file -e HEAD:support/configure.inc 2>/dev/null ||
-     ! git -C "$root" cat-file -e HEAD:src/prop/prop.h 2>/dev/null; then
+  if ! movian_sdk_git "$root" cat-file -e HEAD:support/configure.inc 2>/dev/null ||
+     ! movian_sdk_git "$root" cat-file -e HEAD:src/prop/prop.h 2>/dev/null; then
     echo "  it is a git checkout, but not of Movian -- HEAD has no" >&2
     echo "  support/configure.inc + src/prop/prop.h." >&2
     echo "  fix: point at a Movian checkout, not an unrelated directory." >&2
@@ -61,21 +77,25 @@ movian_sdk_explain_missing_mdev() {
   # The revision is only to blame when the revision really lacks it. A sparse
   # checkout, or a deleted file, leaves HEAD carrying `mdev` while the working
   # tree does not -- and "update this checkout" would do nothing at all.
-  if git -C "$root" cat-file -e HEAD:support/devtools/mdev 2>/dev/null; then
+  if movian_sdk_git "$root" cat-file -e HEAD:support/devtools/mdev 2>/dev/null; then
     echo "  this revision DOES carry it -- the working-tree copy is missing." >&2
-    # A sparse checkout that excludes support/ produces this, and there the
-    # plain form fails with "pathspec ... did not match any file(s) known to
-    # git" and restores nothing. `--ignore-skip-worktree-bits` covers that
-    # case and an ordinary deleted file alike -- both verified.
-    echo "  fix: cd '$root' &&" >&2
-    echo "       git checkout --ignore-skip-worktree-bits -- support/devtools/mdev" >&2
+    # Three ways the file goes missing, and only one command restores all
+    # three. Without `HEAD` the pathspec is read from the INDEX, where a
+    # `git rm --cached` has already removed it; without the flag a
+    # sparse-checkout exclusion refuses the pathspec. Measured, all three:
+    #
+    #   git checkout HEAD --ignore-skip-worktree-bits --   deleted/staged/sparse: ok
+    #   git checkout HEAD --                               sparse: FAIL
+    #   git checkout --ignore-skip-worktree-bits --        staged: FAIL
+    echo "  fix: cd '$root' && git checkout HEAD \\" >&2
+    echo "       --ignore-skip-worktree-bits -- support/devtools/mdev" >&2
     echo "  (if support/ is excluded by sparse-checkout, widen the patterns" >&2
     echo "   too, or the next checkout drops it again.)" >&2
     return
   fi
 
-  head="$(git -C "$root" rev-parse --short HEAD 2>/dev/null)" || head="an unborn HEAD"
-  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch="HEAD"
+  head="$(movian_sdk_git "$root" rev-parse --short HEAD 2>/dev/null)" || head="an unborn HEAD"
+  branch="$(movian_sdk_git "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch="HEAD"
   echo "  it IS a Movian checkout -- on $branch @ $head, a revision without it." >&2
   echo "  fix: update this checkout, or point at one whose revision has support/devtools/mdev." >&2
 }

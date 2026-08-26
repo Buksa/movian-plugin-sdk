@@ -75,10 +75,12 @@ Every failure names the offending path and the fix. The common ones:
     or point at one whose revision carries `support/devtools/mdev`.
   - *"this revision DOES carry it — the working-tree copy is missing"* — a
     deleted file, or a sparse checkout that excludes `support/`. Restore it
-    with `git checkout --ignore-skip-worktree-bits -- support/devtools/mdev`;
-    the plain form fails outright when sparse-checkout excludes the path, and
-    updating the checkout would do nothing either way. If sparse-checkout is
-    the cause, widen the patterns too or the next checkout drops it again.
+    with `git checkout HEAD --ignore-skip-worktree-bits -- support/devtools/mdev`.
+    Both parts are load-bearing: without `HEAD` the pathspec is read from the
+    index, where a `git rm --cached` has already removed it, and without the
+    flag a sparse-checkout exclusion refuses the pathspec. Updating the
+    checkout does nothing in any of these cases. If sparse-checkout is the
+    cause, widen the patterns too or the next checkout drops it again.
   - *"that path is inside the Movian checkout at `<root>`"* — you pointed into
     the tree instead of at it. Point at `<root>`.
 - **"has no executable build.debug/movian"** — the core is not built. Build it

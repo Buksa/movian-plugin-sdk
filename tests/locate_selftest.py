@@ -30,7 +30,8 @@ LOCATE = HERE.parent / "lib" / "locate.sh"
 _CEILING = ""
 
 
-def locate(root: str | None, config: str | None = None) -> tuple[int, str]:
+def locate(root: str | None, config: str | None = None,
+           extra_env: dict[str, str] | None = None) -> tuple[int, str]:
     """Run `movian_sdk_locate` and return its exit code and stderr.
 
     The code is read from the process, never through a pipeline: `cmd | head`
@@ -47,6 +48,7 @@ def locate(root: str | None, config: str | None = None) -> tuple[int, str]:
         # enclosing repository and the case would fail for a reason that has
         # nothing to do with the locator.
         env["GIT_CEILING_DIRECTORIES"] = _CEILING
+    env.update(extra_env or {})
     done = subprocess.run(
         ["bash", "-c", '. "$1"; movian_sdk_locate', "_", str(LOCATE)],
         capture_output=True, text=True, env=env,
@@ -173,7 +175,7 @@ def build_cases(tmp: Path) -> list[tuple[str, str, list[str], list[str]]]:
         ("a checkout whose HEAD has mdev but the file is gone",
          str(sparse),
          ["revision DOES carry it", "--ignore-skip-worktree-bits",
-          "sparse-checkout"],
+          "checkout HEAD", "sparse-checkout"],
          ["unrelated directory", "a revision without it"]),
         ("a C project that merely has src/main.c",
          str(cproject),
@@ -212,6 +214,51 @@ def main() -> int:
             else:
                 print(f"  ok   {label}")
 
+        # Git reads which repository to work on from the environment before
+        # it looks at `-C`, so a hook or wrapping tool that exports GIT_DIR
+        # would redirect the probes at ITS repository and misjudge this one.
+        checkout = tmp / "checkout"
+        code, err = locate(str(checkout),
+                           extra_env={"GIT_DIR": str(tmp / "foreign" / ".git"),
+                                      "GIT_WORK_TREE": str(tmp / "foreign")})
+        if code == 0 or "IS a Movian checkout" not in err:
+            print("  FAIL GIT_DIR redirects the probe: " + err.strip())
+            failures += 1
+        else:
+            print("  ok   an exported GIT_DIR does not redirect the probe")
+
+        # `git rm --cached` leaves HEAD carrying the file and the index not,
+        # and a pathspec is read from the index.
+        staged = tmp / "staged"
+        staged.mkdir()
+        movian_checkout(staged, with_mdev=True)
+        git(staged, "rm", "-q", "--cached", "support/devtools/mdev")
+        (staged / "support" / "devtools" / "mdev").unlink()
+        code, err = locate(str(staged))
+        if code == 0 or "checkout HEAD" not in err:
+            print("  FAIL a staged deletion is not offered a working fix: "
+                  + err.strip())
+            failures += 1
+        else:
+            print("  ok   the restore command names HEAD, not the index")
+
+        # The installer refuses before the shim exists, so it needs the same
+        # diagnosis or a new user never sees it.
+        installer = HERE.parent / "install.sh"
+        done = subprocess.run(
+            ["bash", str(installer), str(tmp / "checkout")],
+            capture_output=True, text=True,
+            env={**os.environ,
+                 "MOVIAN_SDK_BINDIR": str(tmp / "ib"),
+                 "MOVIAN_SDK_LIBDIR": str(tmp / "il"),
+                 "MOVIAN_SDK_CONFIG": str(tmp / "ic.json")})
+        if done.returncode == 0 or "IS a Movian checkout" not in done.stderr:
+            print("  FAIL install.sh does not distinguish the revision: "
+                  + done.stderr.strip()[-200:])
+            failures += 1
+        else:
+            print("  ok   install.sh gives the same diagnosis")
+
         # The happy path, so a locator that refuses everything cannot pass
         # this suite by refusing distinctly.
         good = tmp / "good"
@@ -233,7 +280,7 @@ def main() -> int:
     if failures:
         print(f"selftest: FAILED ({failures} case(s) not diagnosed distinctly)")
         return 1
-    print("selftest: OK -- 10 cases, each naming its own cause")
+    print("selftest: OK -- 13 cases, each naming its own cause")
     return 0
 
 
