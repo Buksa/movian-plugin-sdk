@@ -12,6 +12,41 @@
 
 MOVIAN_SDK_CONFIG="${MOVIAN_SDK_CONFIG:-$HOME/.config/movian-sdk/config.json}"
 
+# Why `support/devtools/mdev` is absent. Three causes, and only one of them is
+# "you pointed at the wrong kind of directory" -- which is what this used to
+# say about all three. A designated core sitting on a revision that predates
+# the devtools is the case actually met in practice (movian-plugin-sdk#32): a
+# real clone of the project, `.git` present, `support/devtools/` present, only
+# `mdev` itself missing because the branch is old. The cause is the revision,
+# and the advice to check whether it is a Movian checkout at all sends the
+# reader past it.
+#
+# Decided on evidence already at hand and free: whether git calls it a work
+# tree, and where that tree's root is.
+movian_sdk_explain_missing_mdev() {
+  local root="$1" top head branch
+
+  if ! command -v git >/dev/null 2>&1 ||
+     ! top="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)"; then
+    echo "  fix: point at a Movian checkout, not an unrelated directory." >&2
+    return
+  fi
+
+  # `git -C` answers for the enclosing tree, so a path INSIDE a checkout
+  # resolves happily and is a different mistake with a different fix.
+  if [ "$top" != "$(cd "$root" && pwd -P)" ]; then
+    echo "  that path is inside the checkout at '$top', not its root." >&2
+    echo "  fix: point at '$top'." >&2
+    return
+  fi
+
+  head="$(git -C "$root" rev-parse --short HEAD 2>/dev/null)" || head="an unborn HEAD"
+  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch="HEAD"
+  echo "  it IS a git checkout -- on $branch @ $head, a revision that does not carry it." >&2
+  echo "  fix: update this checkout, or point at one whose revision has support/devtools/mdev." >&2
+}
+
+
 # Sets MOVIAN_SDK_CORE and MOVIAN_SDK_CORE_SOURCE. Returns non-zero on failure
 # with a diagnosis on stderr.
 movian_sdk_locate() {
@@ -43,7 +78,7 @@ movian_sdk_locate() {
   fi
   if [ ! -e "$root/support/devtools/mdev" ]; then
     echo "movian-sdk: core '$root' (from $source) has no support/devtools/mdev." >&2
-    echo "  fix: point at a Movian checkout, not an unrelated directory." >&2
+    movian_sdk_explain_missing_mdev "$root"
     return 1
   fi
   if [ ! -x "$root/build.debug/movian" ]; then
