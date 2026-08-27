@@ -58,8 +58,8 @@ if [ -n "$core" ]; then
   # genuine Movian checkout on an older revision is told it is "not a Movian
   # checkout" and never reaches the shim that would have said otherwise.
   [ -e "$core/support/devtools/mdev" ] || {
-    echo "error: '$core' has no support/devtools/mdev" >&2
     . "$here/lib/locate.sh"
+    echo "error: $(movian_sdk_shquote "$core") has no support/devtools/mdev" >&2
     movian_sdk_explain_missing_mdev "$core"
     exit 1
   }

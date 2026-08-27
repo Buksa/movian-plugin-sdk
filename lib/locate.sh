@@ -12,12 +12,25 @@
 
 MOVIAN_SDK_CONFIG="${MOVIAN_SDK_CONFIG:-$HOME/.config/movian-sdk/config.json}"
 
+# Paths are printed inside commands the reader is meant to paste, and a path
+# may contain a quote: `/tmp/core's-copy` inside `cd '...'` yields a command
+# that will not run. `printf %q` is bash's own escaping, and it leaves an
+# ordinary path unadorned.
+movian_sdk_shquote() {
+  printf '%q' "$1"
+}
+
+
 # Git reads the repository to work on from the environment before it looks at
 # `-C`, so `GIT_DIR` exported by a hook or a wrapping tool silently redirects
 # these probes at the CALLER's repository. Measured: under `GIT_DIR=<sdk>/.git`,
 # `git -C <target> cat-file -e HEAD:lib/locate.sh` succeeds, and that file
 # exists only in the SDK. `git rev-parse --local-env-vars` is git's own list of
-# the variables that do this.
+# the variables that do this. Measured on git 2.43: that list is 15 names
+# and `GIT_CEILING_DIRECTORIES` is NOT among them, so clearing it here
+# cannot take the caller's sandbox bound with it. `locate_selftest.py`
+# pins that premise rather than guarding against it: a guard no test can
+# exercise is worse than an assumption something checks.
 movian_sdk_git() {
   local root="$1"
   shift
@@ -70,7 +83,7 @@ movian_sdk_explain_missing_mdev() {
   # resolves happily and is a different mistake with a different fix.
   if [ "$top" != "$(cd "$root" && pwd -P)" ]; then
     echo "  that path is inside the Movian checkout at '$top', not its root." >&2
-    echo "  fix: point at '$top'." >&2
+    echo "  fix: point at $(movian_sdk_shquote "$top")." >&2
     return
   fi
 
@@ -87,7 +100,7 @@ movian_sdk_explain_missing_mdev() {
     #   git checkout HEAD --ignore-skip-worktree-bits --   deleted/staged/sparse: ok
     #   git checkout HEAD --                               sparse: FAIL
     #   git checkout --ignore-skip-worktree-bits --        staged: FAIL
-    echo "  fix: cd '$root' && git checkout HEAD \\" >&2
+    echo "  fix: cd $(movian_sdk_shquote "$root") && git checkout HEAD \\" >&2
     echo "       --ignore-skip-worktree-bits -- support/devtools/mdev" >&2
     echo "  (if support/ is excluded by sparse-checkout, widen the patterns" >&2
     echo "   too, or the next checkout drops it again.)" >&2
@@ -137,7 +150,7 @@ movian_sdk_locate() {
   fi
   if [ ! -x "$root/build.debug/movian" ]; then
     echo "movian-sdk: core '$root' (from $source) has no executable build.debug/movian." >&2
-    echo "  fix: cd '$root' && ./support/configure-linux-debug.sh && make BUILD=debug -j\$(nproc)" >&2
+    echo "  fix: cd $(movian_sdk_shquote "$root") && ./support/configure-linux-debug.sh && make BUILD=debug -j\$(nproc)" >&2
     echo "  note: run configure ONLY from the checkout that owns its build.debug." >&2
     return 1
   fi

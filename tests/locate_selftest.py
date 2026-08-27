@@ -338,6 +338,63 @@ def main() -> int:
             else:
                 print(f"  ok   the printed fix restores {label}")
 
+        # A path the reader must paste back into a shell. `cd '<root>'` is
+        # unrunnable the moment the path contains a quote, and the message
+        # exists to be pasted.
+        awkward = tmp / "it's a core"
+        awkward.mkdir()
+        movian_checkout(awkward, with_mdev=True)
+        (awkward / "support" / "devtools" / "mdev").unlink()
+        code, err = locate(str(awkward))
+        command = _printed_fix(err)
+        if code == 0 or command is None:
+            print("  FAIL an awkward path: not diagnosed")
+            failures += 1
+        else:
+            run = subprocess.run(["bash", "-c", command],
+                                 capture_output=True, text=True,
+                                 env={**os.environ,
+                                      "GIT_CONFIG_GLOBAL": os.devnull,
+                                      "GIT_CONFIG_SYSTEM": os.devnull})
+            if not (awkward / "support" / "devtools" / "mdev").exists():
+                print("  FAIL an awkward path: the printed fix does not run")
+                print(f"       $ {command}")
+                print("       " + (run.stderr.strip() or "(no stderr)"))
+                failures += 1
+            else:
+                print("  ok   a path with a quote and spaces stays pasteable")
+
+        # The wrapper clears everything `git rev-parse --local-env-vars`
+        # names. That is safe only while the ceiling -- a sandbox bound, not
+        # a repository selection -- stays off that list. It is off it on git
+        # 2.43, so preserving it would be code no test could exercise; the
+        # premise is pinned instead, and this fails the day git changes it.
+        if "GIT_CEILING_DIRECTORIES" in _GIT_LOCAL_ENV:
+            print("  FAIL git now lists GIT_CEILING_DIRECTORIES as a local env "
+                  "var, so movian_sdk_git() strips the sandbox bound too")
+            failures += 1
+        else:
+            print("  ok   the ceiling is not a variable the wrapper clears")
+
+        # And the wrapper does clear the ones that ARE on that list -- proved
+        # by effect, since a subshell could never have changed the caller's
+        # copy anyway.
+        outer = tmp / "ceiling" / "outer"
+        (outer / "inner").mkdir(parents=True)
+        git(outer, "init", "-q", ".")
+        probe = subprocess.run(
+            ["bash", "-c",
+             '. "$1"; movian_sdk_git "$2" rev-parse --show-toplevel',
+             "_", str(LOCATE), str(outer / "inner")],
+            capture_output=True, text=True,
+            env={**os.environ, "GIT_DIR": str(LOCATE.parent.parent / ".git")})
+        if probe.returncode == 0 and str(outer) not in probe.stdout:
+            print("  FAIL GIT_DIR still redirects the wrapper: "
+                  + probe.stdout.strip())
+            failures += 1
+        else:
+            print("  ok   an exported GIT_DIR does not redirect the wrapper")
+
         # The installer refuses before the shim exists, so it needs the same
         # diagnosis or a new user never sees it.
         installer = HERE.parent / "install.sh"
@@ -376,7 +433,7 @@ def main() -> int:
     if failures:
         print(f"selftest: FAILED ({failures} case(s) not diagnosed distinctly)")
         return 1
-    print("selftest: OK -- 15 cases, each naming its own cause")
+    print("selftest: OK -- 18 cases, each naming its own cause")
     return 0
 
 

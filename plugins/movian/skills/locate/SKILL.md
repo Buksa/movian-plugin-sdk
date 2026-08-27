@@ -66,8 +66,9 @@ Every failure names the offending path and the fix. The common ones:
 - **"has no support/devtools/mdev"** — five different causes, and the second
   line of the message says which. Read it rather than assuming the path is
   wrong:
-  - **no second line at all** — the path is not a git work tree, so there was
-    nothing further to read. Point somewhere else.
+  - **no explanatory line, only the generic `fix:`** — the path is not a git
+    work tree, so there was nothing further to determine. Point somewhere
+    else.
   - *"it is a git checkout, but not of Movian"* — it is version-controlled and
     is some other project. The markers are `support/configure.inc` **and**
     `src/prop/prop.h` in HEAD, together: a bare C project with `src/main.c`
@@ -77,7 +78,10 @@ Every failure names the offending path and the fix. The common ones:
     or point at one whose revision carries `support/devtools/mdev`.
   - *"this revision DOES carry it — the working-tree copy is missing"* — a
     deleted file, or a sparse checkout that excludes `support/`. Restore it
-    with `git checkout HEAD --ignore-skip-worktree-bits -- support/devtools/mdev`.
+    with the command the message prints, **including its `cd`** — it names the
+    checkout root, and running the rest from anywhere else hits a different
+    repository:
+    `cd <root> && git checkout HEAD --ignore-skip-worktree-bits -- support/devtools/mdev`.
     Both parts are load-bearing: without `HEAD` the pathspec is read from the
     index, where a `git rm --cached` has already removed it, and without the
     flag a sparse-checkout exclusion refuses the pathspec. Updating the
