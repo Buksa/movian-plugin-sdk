@@ -75,6 +75,24 @@ def locate(root: str | None, config: str | None = None,
     return done.returncode, done.stderr
 
 
+def _fixture_env() -> dict[str, str]:
+    """The environment every fixture git call runs in.
+
+    Repository selection is stripped, not just configuration. `GIT_DIR`
+    exported by a hook or wrapper applies despite `-C`, so `git init`,
+    `git add` and `git commit` here would be aimed at the CALLER's
+    repository -- reproduced: the suite aborts at the first commit, and a
+    caller repo in a different state could have been committed into.
+    """
+    env = {name: value for name, value in os.environ.items()
+           if name not in _GIT_LOCAL_ENV}
+    env.update({"GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_SYSTEM": os.devnull,
+                "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+    return env
+
+
 def git(root: Path, *args: str) -> None:
     """Run git with the developer's own configuration kept out of it.
 
@@ -85,12 +103,7 @@ def git(root: Path, *args: str) -> None:
     """
     subprocess.run(["git", "-C", str(root), "-c", "commit.gpgsign=false",
                     "-c", "core.hooksPath=/dev/null", *args],
-                   check=True, capture_output=True,
-                   env={**os.environ,
-                        "GIT_CONFIG_GLOBAL": os.devnull,
-                        "GIT_CONFIG_SYSTEM": os.devnull,
-                        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+                   check=True, capture_output=True, env=_fixture_env())
 
 
 def movian_checkout(root: Path, *, with_mdev: bool) -> None:
@@ -120,10 +133,7 @@ def movian_checkout(root: Path, *, with_mdev: bool) -> None:
 
 def _git_out(root: Path, *args: str) -> str:
     done = subprocess.run(["git", "-C", str(root), *args],
-                          capture_output=True, text=True,
-                          env={**os.environ,
-                               "GIT_CONFIG_GLOBAL": os.devnull,
-                               "GIT_CONFIG_SYSTEM": os.devnull})
+                          capture_output=True, text=True, env=_fixture_env())
     return done.stdout
 
 
@@ -326,9 +336,7 @@ def main() -> int:
                 continue
             run = subprocess.run(["bash", "-c", command], cwd=str(where),
                                  capture_output=True, text=True,
-                                 env={**os.environ,
-                                      "GIT_CONFIG_GLOBAL": os.devnull,
-                                      "GIT_CONFIG_SYSTEM": os.devnull})
+                                 env=_fixture_env())
             restored = (where / "support" / "devtools" / "mdev").exists()
             if not restored:
                 print(f"  FAIL {label}: the printed fix did not restore it")
@@ -353,9 +361,7 @@ def main() -> int:
         else:
             run = subprocess.run(["bash", "-c", command],
                                  capture_output=True, text=True,
-                                 env={**os.environ,
-                                      "GIT_CONFIG_GLOBAL": os.devnull,
-                                      "GIT_CONFIG_SYSTEM": os.devnull})
+                                 env=_fixture_env())
             if not (awkward / "support" / "devtools" / "mdev").exists():
                 print("  FAIL an awkward path: the printed fix does not run")
                 print(f"       $ {command}")
@@ -395,13 +401,38 @@ def main() -> int:
         else:
             print("  ok   an exported GIT_DIR does not redirect the wrapper")
 
+        # "git said no" and "git could not answer" are different findings. A
+        # checkout owned by another UID -- a host-mounted tree in a container
+        # is the ordinary way -- fails every probe with dubious ownership,
+        # and reporting that as "not a Movian checkout" sends the reader at
+        # the one remedy that cannot help.
+        code, err = locate(str(tmp / "checkout"),
+                           extra_env={"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"})
+        if code == 0 or "git could not read it" not in err:
+            print("  FAIL an unreadable repository is misdiagnosed: "
+                  + err.strip()[-160:])
+            failures += 1
+        elif "unrelated directory" in err:
+            print("  FAIL an unreadable repository still reads as unrelated")
+            failures += 1
+        else:
+            print("  ok   a probe git cannot answer is its own finding")
+
+        # ...and that must not swallow the genuine case.
+        code, err = locate(str(tmp / "unrelated"))
+        if "git could not read it" in err:
+            print("  FAIL an unrelated directory now reads as unreadable")
+            failures += 1
+        else:
+            print("  ok   an unrelated directory is still unrelated")
+
         # The installer refuses before the shim exists, so it needs the same
         # diagnosis or a new user never sees it.
         installer = HERE.parent / "install.sh"
         done = subprocess.run(
             ["bash", str(installer), str(tmp / "checkout")],
             capture_output=True, text=True,
-            env={**os.environ,
+            env={**_fixture_env(),
                  "MOVIAN_SDK_BINDIR": str(tmp / "ib"),
                  "MOVIAN_SDK_LIBDIR": str(tmp / "il"),
                  "MOVIAN_SDK_CONFIG": str(tmp / "ic.json")})
@@ -433,7 +464,7 @@ def main() -> int:
     if failures:
         print(f"selftest: FAILED ({failures} case(s) not diagnosed distinctly)")
         return 1
-    print("selftest: OK -- 18 cases, each naming its own cause")
+    print("selftest: OK -- 20 cases, each naming its own cause")
     return 0
 
 

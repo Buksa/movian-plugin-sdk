@@ -55,11 +55,34 @@ movian_sdk_git() {
 movian_sdk_explain_missing_mdev() {
   local root="$1" top head branch
 
-  if ! command -v git >/dev/null 2>&1 ||
-     ! top="$(movian_sdk_git "$root" rev-parse --show-toplevel 2>/dev/null)"; then
+  if ! command -v git >/dev/null 2>&1; then
     echo "  fix: point at a Movian checkout, not an unrelated directory." >&2
     return
   fi
+
+  # "git said no" and "git could not answer" are different findings. A
+  # checkout owned by another UID -- a host-mounted tree in a container is
+  # the ordinary way that happens -- makes every probe fail with dubious
+  # ownership, and reporting that as "not a Movian checkout" is the exact
+  # conflation this function exists to remove. Git's own message is the
+  # useful thing to show; it already names the remedy.
+  local probe
+  if ! probe="$(movian_sdk_git "$root" rev-parse --show-toplevel 2>&1)"; then
+    case "$probe" in
+      *"not a git repository"*)
+        echo "  fix: point at a Movian checkout, not an unrelated directory." >&2
+        ;;
+      *)
+        echo "  git could not read it, so nothing further could be" >&2
+        echo "  determined about the path:" >&2
+        printf '%s\n' "$probe" | while IFS= read -r line; do
+          printf '    %s\n' "$line" >&2
+        done
+        ;;
+    esac
+    return
+  fi
+  top="$probe"
 
   # Being a git work tree is not evidence of being THIS project, and plenty of
   # unrelated directories are version-controlled. Nor is `src/main.c`, which
