@@ -53,8 +53,14 @@ if [ -n "$core" ]; then
     *) echo "error: core path must be absolute, got '$core'" >&2; exit 1 ;;
   esac
   [ -d "$core" ] || { echo "error: '$core' is not a directory" >&2; exit 1; }
+  # The same diagnosis the locator gives, at the moment the path is first
+  # named. Without this a new user following the documented setup with a
+  # genuine Movian checkout on an older revision is told it is "not a Movian
+  # checkout" and never reaches the shim that would have said otherwise.
   [ -e "$core/support/devtools/mdev" ] || {
-    echo "error: '$core' has no support/devtools/mdev — not a Movian checkout" >&2
+    . "$here/lib/locate.sh"
+    echo "error: $(movian_sdk_shquote "$core") has no support/devtools/mdev" >&2
+    movian_sdk_explain_missing_mdev "$core"
     exit 1
   }
   printf '{\n  "core": "%s"\n}\n' "$core" > "$config"

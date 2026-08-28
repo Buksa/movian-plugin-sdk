@@ -63,7 +63,37 @@ Every failure names the offending path and the fix. The common ones:
 
 - **"no Movian core configured"** — neither `MOVIAN_CORE` nor the config file is
   set. Create `~/.config/movian-sdk/config.json` with the core path.
-- **"has no support/devtools/mdev"** — the path is not a Movian checkout.
+- **"has no support/devtools/mdev"** — five different causes, and the second
+  line of the message says which. Read it rather than assuming the path is
+  wrong:
+  - **no explanatory line, only the generic `fix:`** — the path is not a git
+    work tree, so there was nothing further to determine. Point somewhere
+    else.
+  - *"it is a git checkout, but not of Movian"* — it is version-controlled and
+    is some other project. The markers are `support/configure.inc` **and**
+    `src/prop/prop.h` in HEAD, together: a bare C project with `src/main.c`
+    is not enough, and neither marker alone is. Point somewhere else.
+  - *"it IS a Movian checkout — on `<branch>` @ `<sha>`, a revision without
+    it"* — the path is right and the **revision** is old. Update that checkout,
+    or point at one whose revision carries `support/devtools/mdev`.
+  - *"this revision DOES carry it — the working-tree copy is missing"* — a
+    deleted file, or a sparse checkout that excludes `support/`. Restore it
+    with the command the message prints, **including its `cd`** — it names the
+    checkout root, and running the rest from anywhere else hits a different
+    repository:
+    **Paste the locator's own command — do not retype it from here.** It
+    chooses the source deliberately:
+    `git checkout --ignore-skip-worktree-bits -- support/devtools/mdev`
+    restores from the index and keeps a staged modification, while
+    `git checkout HEAD --ignore-skip-worktree-bits -- ...` appears only when
+    the index has lost the path (a `git rm --cached`). Adding `HEAD` yourself
+    to the first form replaces the index too and **discards staged work
+    silently**. The `--ignore-skip-worktree-bits` flag is always there: a
+    sparse-checkout exclusion refuses the pathspec without it. Updating the
+    checkout does nothing in any of these cases; if sparse-checkout is the
+    cause, widen the patterns too or the next checkout drops it again.
+  - *"that path is inside the Movian checkout at `<root>`"* — you pointed into
+    the tree instead of at it. Point at `<root>`.
 - **"has no executable build.debug/movian"** — the core is not built. Build it
   **from the checkout that owns its `build.debug`**:
 
