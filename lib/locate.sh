@@ -36,7 +36,8 @@ movian_sdk_git() {
   shift
   (
     unset $(git rev-parse --local-env-vars 2>/dev/null) 2>/dev/null || true
-    git -C "$root" "$@"
+    # Classification reads git's own words, so they must not be translated.
+    LC_ALL=C LANGUAGE= git -C "$root" "$@"
   )
 }
 
@@ -66,8 +67,21 @@ movian_sdk_explain_missing_mdev() {
   # ownership, and reporting that as "not a Movian checkout" is the exact
   # conflation this function exists to remove. Git's own message is the
   # useful thing to show; it already names the remedy.
-  local probe
-  if ! probe="$(movian_sdk_git "$root" rev-parse --show-toplevel 2>&1)"; then
+  # stderr goes to a file rather than into the answer: `GIT_TRACE=1` makes a
+  # SUCCESSFUL rev-parse write to stderr too, and merging the two put a trace
+  # line inside `$top` -- the message then offered a timestamp as the path to
+  # point at.
+  local errfile status
+  errfile="$(mktemp)"
+  top="$(movian_sdk_git "$root" rev-parse --show-toplevel 2>"$errfile")"
+  status=$?
+  if [ $status -ne 0 ]; then
+    local probe
+    probe="$(cat "$errfile")"
+    rm -f "$errfile"
+    # "git said no" and "git could not answer" are different findings, and
+    # the difference is read from a C-locale message: `movian_sdk_git` forces
+    # LC_ALL=C so this comparison is not against a translation.
     case "$probe" in
       *"not a git repository"*)
         echo "  fix: point at a Movian checkout, not an unrelated directory." >&2
@@ -82,7 +96,7 @@ movian_sdk_explain_missing_mdev() {
     esac
     return
   fi
-  top="$probe"
+  rm -f "$errfile"
 
   # Being a git work tree is not evidence of being THIS project, and plenty of
   # unrelated directories are version-controlled. Nor is `src/main.c`, which
@@ -123,7 +137,14 @@ movian_sdk_explain_missing_mdev() {
     #   git checkout HEAD --ignore-skip-worktree-bits --   deleted/staged/sparse: ok
     #   git checkout HEAD --                               sparse: FAIL
     #   git checkout --ignore-skip-worktree-bits --        staged: FAIL
-    echo "  fix: cd $(movian_sdk_shquote "$root") && git checkout HEAD \\" >&2
+    # `git checkout HEAD -- <path>` rewrites the INDEX as well, so a staged
+    # modification of `mdev` would be replaced by the committed version
+    # without a word. Restoring from the index keeps it; only a staged
+    # DELETION -- where the index no longer has the path -- needs HEAD.
+    local source=""
+    movian_sdk_git "$root" cat-file -e :support/devtools/mdev 2>/dev/null ||
+      source="HEAD "
+    echo "  fix: cd $(movian_sdk_shquote "$root") && git checkout ${source}\\" >&2
     echo "       --ignore-skip-worktree-bits -- support/devtools/mdev" >&2
     echo "  (if support/ is excluded by sparse-checkout, widen the patterns" >&2
     echo "   too, or the next checkout drops it again.)" >&2

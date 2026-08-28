@@ -58,6 +58,12 @@ def locate(root: str | None, config: str | None = None,
     # testing what it thinks it is.
     for name in _GIT_LOCAL_ENV:
         env.pop(name, None)
+    # And the same isolated configuration the fixtures get. A global
+    # `safe.directory = *` would make the ownership probe succeed and quietly
+    # turn that case into a pass -- the suite is documented as needing no
+    # setup, so it must not depend on the developer having none either.
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
     if root is not None:
         env["MOVIAN_CORE"] = root
     env["MOVIAN_SDK_CONFIG"] = config if config else "/nonexistent/config.json"
@@ -234,8 +240,11 @@ def build_cases(tmp: Path) -> list[tuple[str, str, list[str], list[str]]]:
           "revision DOES carry it"]),
         ("a checkout whose HEAD has mdev but the file is gone",
          str(sparse),
-         ["revision DOES carry it", "--ignore-skip-worktree-bits",
-          "checkout HEAD", "sparse-checkout"],
+         # Not "checkout HEAD": which source is right depends on the shape,
+         # and the behavioural checks below prove each one. HEAD appears only
+         # where the index has lost the path.
+         ["revision DOES carry it", "git checkout",
+          "--ignore-skip-worktree-bits", "sparse-checkout"],
          ["unrelated directory", "a revision without it"]),
         ("a C project that merely has src/main.c",
          str(cproject),
@@ -315,8 +324,20 @@ def main() -> int:
                     for line in _git_out(root, "ls-files", "-t").splitlines()),
         }
 
+        # A staged modification plus a deleted working copy. `git checkout
+        # HEAD -- <path>` rewrites the INDEX too, so the remedy would replace
+        # staged work with the committed version and say nothing.
+        stagedmod = tmp / "stagedmod"
+        stagedmod.mkdir()
+        movian_checkout(stagedmod, with_mdev=True)
+        target = stagedmod / "support" / "devtools" / "mdev"
+        target.write_text("STAGED WORK\n", encoding="utf-8")
+        git(stagedmod, "add", "support/devtools/mdev")
+        target.unlink()
+
         for label, where in (("an ordinary deletion", deleted),
                              ("a staged deletion", staged),
+                             ("a staged modification", stagedmod),
                              ("a sparse-checkout exclusion",
                               FIXTURES["sparse"])):
             check = preconditions.get(label)
@@ -338,6 +359,14 @@ def main() -> int:
                                  capture_output=True, text=True,
                                  env=_fixture_env())
             restored = (where / "support" / "devtools" / "mdev").exists()
+            if restored and label == "a staged modification":
+                content = (where / "support" / "devtools"
+                           / "mdev").read_text(encoding="utf-8")
+                if "STAGED WORK" not in content:
+                    print("  FAIL %s: the printed fix discarded staged work "
+                          "(%r)" % (label, content.strip()))
+                    failures += 1
+                    continue
             if not restored:
                 print(f"  FAIL {label}: the printed fix did not restore it")
                 print(f"       $ {command}")
@@ -418,6 +447,57 @@ def main() -> int:
         else:
             print("  ok   a probe git cannot answer is its own finding")
 
+        # A global `safe.directory = *` in the developer's own configuration
+        # would make the ownership probe succeed and turn the case above into
+        # a pass that proved nothing. Pinned by handing the suite exactly that
+        # configuration and requiring the verdict not to move.
+        permissive = tmp / "permissive.gitconfig"
+        permissive.write_text("[safe]\n\tdirectory = *\n", encoding="utf-8")
+        # Set in the CALLER's environment, which is where it would really be
+        # -- passing it as an override would only test the override.
+        previous = os.environ.get("GIT_CONFIG_GLOBAL")
+        os.environ["GIT_CONFIG_GLOBAL"] = str(permissive)
+        try:
+            code, err = locate(
+                str(tmp / "checkout"),
+                extra_env={"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"})
+        finally:
+            if previous is None:
+                os.environ.pop("GIT_CONFIG_GLOBAL", None)
+            else:
+                os.environ["GIT_CONFIG_GLOBAL"] = previous
+        if code == 0 or "git could not read it" not in err:
+            print("  FAIL a permissive global config reaches the locator")
+            failures += 1
+        else:
+            print("  ok   the locator ignores the developer's git config")
+
+        # Classification reads git's own words, so a translated git must not
+        # change the verdict. A stub git answers in German unless LC_ALL=C
+        # reached it, which is exactly what the wrapper is meant to force.
+        stub_dir = tmp / "stubbin"
+        stub_dir.mkdir()
+        stub = stub_dir / "git"
+        stub.write_text(
+            "#!/bin/sh\n"
+            'if [ "$LC_ALL" = C ]; then\n'
+            '  echo "fatal: not a git repository (or any of the parent '
+            'directories): .git" >&2\n'
+            "else\n"
+            '  echo "fatal: Kein Git-Repository (oder irgendein '
+            'Elternverzeichnis): .git" >&2\n'
+            "fi\n"
+            "exit 128\n", encoding="utf-8")
+        stub.chmod(0o755)
+        code, err = locate(str(tmp / "unrelated"),
+                           extra_env={"PATH": "%s:%s" % (stub_dir,
+                                                         os.environ["PATH"])})
+        if "unrelated directory" not in err or "git could not read it" in err:
+            print("  FAIL a translated git changes the verdict: " + err.strip())
+            failures += 1
+        else:
+            print("  ok   a translated git does not change the verdict")
+
         # ...and that must not swallow the genuine case.
         code, err = locate(str(tmp / "unrelated"))
         if "git could not read it" in err:
@@ -464,7 +544,7 @@ def main() -> int:
     if failures:
         print(f"selftest: FAILED ({failures} case(s) not diagnosed distinctly)")
         return 1
-    print("selftest: OK -- 20 cases, each naming its own cause")
+    print("selftest: OK -- 23 cases, each naming its own cause")
     return 0
 
 
