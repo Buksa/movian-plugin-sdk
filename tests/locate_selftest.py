@@ -507,21 +507,60 @@ def main() -> int:
             print("  ok   an unrelated directory is still unrelated")
 
         # The installer refuses before the shim exists, so it needs the same
-        # diagnosis or a new user never sees it.
+        # diagnosis or a new user never sees it. Every branch, not just the
+        # one whose probe succeeds: `install.sh` runs under `set -e`, and a
+        # failing probe assignment took the whole shell with it -- exit 128
+        # after the first line, with none of the diagnosis printed.
         installer = HERE.parent / "install.sh"
-        done = subprocess.run(
-            ["bash", str(installer), str(tmp / "checkout")],
-            capture_output=True, text=True,
-            env={**_fixture_env(),
-                 "MOVIAN_SDK_BINDIR": str(tmp / "ib"),
-                 "MOVIAN_SDK_LIBDIR": str(tmp / "il"),
-                 "MOVIAN_SDK_CONFIG": str(tmp / "ic.json")})
-        if done.returncode == 0 or "IS a Movian checkout" not in done.stderr:
-            print("  FAIL install.sh does not distinguish the revision: "
-                  + done.stderr.strip()[-200:])
+
+        def install(root: Path, extra: dict[str, str] | None = None):
+            return subprocess.run(
+                ["bash", str(installer), str(root)],
+                capture_output=True, text=True,
+                env={**_fixture_env(),
+                     **(extra or {}),
+                     "MOVIAN_SDK_BINDIR": str(tmp / "ib"),
+                     "MOVIAN_SDK_LIBDIR": str(tmp / "il"),
+                     "MOVIAN_SDK_CONFIG": str(tmp / "ic.json")})
+
+        for label, root, wanted, extra in (
+                ("an old revision", tmp / "checkout", "IS a Movian checkout",
+                 None),
+                ("an unrelated directory", tmp / "unrelated",
+                 "unrelated directory", None),
+                ("a repository git cannot read", tmp / "checkout",
+                 "git could not read it",
+                 {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"})):
+            done = install(root, extra)
+            if done.returncode == 0:
+                print(f"  FAIL install.sh accepted {label}")
+                failures += 1
+            elif done.returncode != 1:
+                print(f"  FAIL install.sh aborted on {label} with exit "
+                      f"{done.returncode} -- the diagnosis never ran")
+                failures += 1
+            elif wanted not in done.stderr:
+                print(f"  FAIL install.sh does not diagnose {label}: "
+                      + done.stderr.strip()[-160:])
+                failures += 1
+            else:
+                print(f"  ok   install.sh diagnoses {label}")
+
+        # The guide and the tool diverged once already, and in the direction
+        # that costs work: the code stopped adding `HEAD` when the index has
+        # the path, and the skill still told agents to add it -- overriding
+        # the safeguard by hand. Documentation is not usually testable, but
+        # "the delivered guidance contradicts the tool" is.
+        guide = (HERE.parent / "plugins" / "movian" / "skills" / "locate"
+                 / "SKILL.md").read_text(encoding="utf-8")
+        if "cd <root> && git checkout HEAD" in guide:
+            print("  FAIL the skill prescribes an unconditional checkout HEAD")
+            failures += 1
+        elif "discards staged work" not in guide:
+            print("  FAIL the skill does not warn what adding HEAD costs")
             failures += 1
         else:
-            print("  ok   install.sh gives the same diagnosis")
+            print("  ok   the skill matches what the locator prints")
 
         # The happy path, so a locator that refuses everything cannot pass
         # this suite by refusing distinctly.
@@ -544,7 +583,7 @@ def main() -> int:
     if failures:
         print(f"selftest: FAILED ({failures} case(s) not diagnosed distinctly)")
         return 1
-    print("selftest: OK -- 23 cases, each naming its own cause")
+    print("selftest: OK -- 26 cases, each naming its own cause")
     return 0
 
 

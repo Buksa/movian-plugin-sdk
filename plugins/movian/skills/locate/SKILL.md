@@ -81,11 +81,16 @@ Every failure names the offending path and the fix. The common ones:
     with the command the message prints, **including its `cd`** — it names the
     checkout root, and running the rest from anywhere else hits a different
     repository:
-    `cd <root> && git checkout HEAD --ignore-skip-worktree-bits -- support/devtools/mdev`.
-    Both parts are load-bearing: without `HEAD` the pathspec is read from the
-    index, where a `git rm --cached` has already removed it, and without the
-    flag a sparse-checkout exclusion refuses the pathspec. Updating the
-    checkout does nothing in any of these cases. If sparse-checkout is the
+    **Paste the locator's own command — do not retype it from here.** It
+    chooses the source deliberately:
+    `git checkout --ignore-skip-worktree-bits -- support/devtools/mdev`
+    restores from the index and keeps a staged modification, while
+    `git checkout HEAD --ignore-skip-worktree-bits -- ...` appears only when
+    the index has lost the path (a `git rm --cached`). Adding `HEAD` yourself
+    to the first form replaces the index too and **discards staged work
+    silently**. The `--ignore-skip-worktree-bits` flag is always there: a
+    sparse-checkout exclusion refuses the pathspec without it. Updating the
+    checkout does nothing in any of these cases; if sparse-checkout is the
     cause, widen the patterns too or the next checkout drops it again.
   - *"that path is inside the Movian checkout at `<root>`"* — you pointed into
     the tree instead of at it. Point at `<root>`.

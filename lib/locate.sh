@@ -71,11 +71,14 @@ movian_sdk_explain_missing_mdev() {
   # SUCCESSFUL rev-parse write to stderr too, and merging the two put a trace
   # line inside `$top` -- the message then offered a timestamp as the path to
   # point at.
-  local errfile status
+  # The assignment is INSIDE the `if`, because `install.sh` sources this with
+  # `set -e` active: a bare `top=$(...)` that fails takes the whole shell with
+  # it, and the installer exited 128 having printed only its first line --
+  # none of the diagnosis below. An `if` condition suspends errexit.
+  local errfile
   errfile="$(mktemp)"
-  top="$(movian_sdk_git "$root" rev-parse --show-toplevel 2>"$errfile")"
-  status=$?
-  if [ $status -ne 0 ]; then
+  if ! top="$(movian_sdk_git "$root" rev-parse --show-toplevel 2>"$errfile")"
+  then
     local probe
     probe="$(cat "$errfile")"
     rm -f "$errfile"
