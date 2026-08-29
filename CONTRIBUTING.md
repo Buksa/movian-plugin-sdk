@@ -77,16 +77,33 @@ Not installed; run from the checkout.
 ```
 python3 tests/typefloor_selftest.py --dts "$(mdev core)/generated/movian-api.d.ts"
 python3 tests/locate_selftest.py
+python3 tests/reachable_selftest.py
 ```
 
 The first needs a core whose artifact currently passes, and says so if given one
-that does not. The second needs **no Movian core and no SDK configuration** —
-it builds each kind of broken core on disk, requires the locator to name that
-cause and not another's, and then RUNS the fix each message prints to check it
-actually works. It does need `git`, `bash` and Python on PATH, and it writes
-synthetic repositories under `TMPDIR`. Anything added here should be able to **fail** for a stated reason:
-this suite exists because `mdev types` now makes a claim about the core's
-artifact, and a claim nothing can falsify is the bug it was written to prevent.
+that does not.
+
+The second needs **no Movian core and no SDK configuration** — it builds each
+kind of broken core on disk, requires the locator to name that cause and not
+another's, and then RUNS the fix each message prints to check it actually works.
+It does need `git`, `bash` and Python on PATH, and it writes synthetic
+repositories under `TMPDIR`.
+
+The third asks whether the installed shims are reachable from the shells that
+will actually run them — including the case that used to pass **silently**, an
+install run from a *login* shell on a machine whose `~/.bashrc` lacks the
+directory. It builds Debian-shaped synthetic homes under `TMPDIR`, drives real
+`bash -lc` / `-ic` / `-c`, and it too runs the fix its own warning prints. It
+needs `jq` and `awk` alongside the rest, and it **skips rather than guesses**
+where `/etc/skel/.bashrc` is absent: it asserts against the dotfiles a
+distribution ships, never against invented ones.
+
+Anything added here should be able to **fail** for a stated reason: this suite
+exists because `mdev types` now makes a claim about the core's artifact, and a
+claim nothing can falsify is the bug it was written to prevent. The reachability
+half earns its place the same way — four properties of its probe each produce a
+confident *wrong answer* rather than an error when omitted, so each has a case
+that fails without it.
 
 ## `salvage/`
 

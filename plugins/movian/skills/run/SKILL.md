@@ -5,6 +5,24 @@ description: Launch, stop, drive and observe a Movian instance from a plugin rep
 
 # Running Movian from a plugin repo
 
+> **Resolving `mdev` first.** Every `mdev` command below assumes the shim is
+> reachable. It often is not: an agent session runs a **non-interactive** shell,
+> which reads neither `~/.profile` nor `~/.bashrc`, so `mdev` is on `PATH` only
+> if whatever launched the session happened to put it there. Do not rely on that.
+>
+> Once per session, before the first `mdev` command, resolve it from the path the
+> installer recorded and use that path for the rest of the session:
+>
+> ```sh
+> command -v mdev || jq -r '.bin + "/mdev"' ~/.config/movian-sdk/config.json
+> ```
+>
+> If neither answers, the SDK is not installed here — say so rather than guessing
+> a path: `cd movian-plugin-sdk && ./install.sh /abs/path/to/movian/checkout`.
+> This preamble is repeated in every `movian:*` skill on purpose, because skills
+> load individually and you may be holding only this one.
+
+
 Mechanics only. **What counts as proof is a separate question** — see the
 `movian:verify` skill. This skill gets Movian running and gets data out of it.
 

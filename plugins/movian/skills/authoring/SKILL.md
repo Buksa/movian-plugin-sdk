@@ -10,6 +10,24 @@ description: >-
 
 # Authoring a Movian plugin
 
+> **Resolving `mdev` first.** Every `mdev` command below assumes the shim is
+> reachable. It often is not: an agent session runs a **non-interactive** shell,
+> which reads neither `~/.profile` nor `~/.bashrc`, so `mdev` is on `PATH` only
+> if whatever launched the session happened to put it there. Do not rely on that.
+>
+> Once per session, before the first `mdev` command, resolve it from the path the
+> installer recorded and use that path for the rest of the session:
+>
+> ```sh
+> command -v mdev || jq -r '.bin + "/mdev"' ~/.config/movian-sdk/config.json
+> ```
+>
+> If neither answers, the SDK is not installed here — say so rather than guessing
+> a path: `cd movian-plugin-sdk && ./install.sh /abs/path/to/movian/checkout`.
+> This preamble is repeated in every `movian:*` skill on purpose, because skills
+> load individually and you may be holding only this one.
+
+
 Derived from the nine plugins that exist — HDRezka, trakt, m7-jellyfin, anilibria,
 youtube, qobuz, tmdb, dailymotion, soap4.me — and from the core that runs them.
 **No authoring documentation ever existed**, so this does not codify common practice;

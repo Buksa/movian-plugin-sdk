@@ -148,6 +148,37 @@ if [ "${1:-}" = "doctor" ]; then
     fi
   fi
 
+  # Reachability, from the SAME check install.sh runs — one implementation, two
+  # callers (movian-plugin-sdk#38). `doctor` is the caller that can be re-run
+  # after the user edits a dotfile, which the installer cannot.
+  if [ -f "$MOVIAN_SDK_LIB/reachable.sh" ]; then
+    . "$MOVIAN_SDK_LIB/reachable.sh"
+    self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if recorded="$(movian_sdk_bindir)"; then
+      # The one honest check available for the agent's `bash -c`, whose
+      # environment holds no state to inspect: does the bindir agents are
+      # pointed at match the one this invocation actually came from?
+      if [ "$recorded" = "$self" ]; then
+        echo "bindir:    $recorded"
+      else
+        echo "bindir:    MISMATCH — recorded $recorded, but this mdev ran from $self"
+        rc=1
+      fi
+    else
+      echo "bindir:    UNRECORDED — rerun install.sh so skills can resolve mdev without PATH"
+      rc=1
+    fi
+    movian_sdk_reachability_report "${recorded:-$self}"
+    if [ "$MOVIAN_SDK_REACH_WORST" != REACHABLE ]; then
+      movian_sdk_explain_unreachable "${recorded:-$self}" "$MOVIAN_SDK_ROOT" \
+        "$MOVIAN_SDK_REACH_WORST"
+    fi
+    # Not counted into rc: reachability is a command, not a gate (#3). And note
+    # what is NOT claimed — that an agent followed the resolution preamble. That
+    # guarantee is documentary, and doctor stays silent rather than implying a
+    # check it did not perform.
+  fi
+
   echo
   echo "--- core: mdev lsp doctor ---"
   "$MOVIAN_SDK_CORE/support/devtools/mdev" lsp doctor || rc=$?
