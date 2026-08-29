@@ -117,12 +117,25 @@ movian_sdk_probe() {
 # resolution preamble the skills carry (#41).
 # Sets MOVIAN_SDK_REACH_WORST to the worst verdict seen. Always returns 0: a
 # verdict is data, not a failure, and install.sh runs under `set -e`.
+# Sets MOVIAN_SDK_REACH_WORST to the worst verdict seen, and
+# MOVIAN_SDK_REACH_<SHAPE> to each shape's own. The per-shape verdicts are kept
+# because the remedy differs: a login shell that cannot reach the bindir is not
+# repaired by editing ~/.bashrc, so a diagnosis that assumes which half failed
+# can send the reader to the wrong file.
+# Always returns 0: a verdict is data, not a failure, and install.sh runs under
+# `set -e`.
 movian_sdk_reachability_report() {
   local bindir="$1" shape verdict
   MOVIAN_SDK_REACH_WORST=REACHABLE
+  MOVIAN_SDK_REACH_LOGIN=""
+  MOVIAN_SDK_REACH_INTERACTIVE=""
   for shape in login interactive; do
     verdict="$(movian_sdk_probe "$bindir" "$shape")"
     printf 'reachable: %-14s %s\n' "$shape" "$verdict"
+    case "$shape" in
+      login)       MOVIAN_SDK_REACH_LOGIN="$verdict" ;;
+      interactive) MOVIAN_SDK_REACH_INTERACTIVE="$verdict" ;;
+    esac
     case "$verdict" in
       UNREACHABLE)  MOVIAN_SDK_REACH_WORST=UNREACHABLE ;;
       UNDETERMINED) [ "$MOVIAN_SDK_REACH_WORST" = REACHABLE ] &&
@@ -145,9 +158,27 @@ movian_sdk_explain_unreachable() {
     echo "  this is not a verdict either way -- rerun, or check your ~/.bashrc." >&2
     return 0
   fi
-  echo "warning: $(movian_sdk_shquote "$bindir") is not reachable from the shells that will run mdev" >&2
-  echo "  your ~/.profile puts it on PATH for LOGIN shells only; Debian's ~/.bashrc does not," >&2
-  echo "  so an ordinary terminal answers 'mdev: command not found'." >&2
+  local login="${MOVIAN_SDK_REACH_LOGIN:-}" inter="${MOVIAN_SDK_REACH_INTERACTIVE:-}"
+  echo "warning: $(movian_sdk_shquote "$bindir") is not reachable from every shell that will run mdev" >&2
+
+  # Name the shape that actually failed. Claiming "login works, terminals do
+  # not" unconditionally is false whenever a custom bindir is in neither startup
+  # file, and exactly backwards when login is the failing half -- and there the
+  # ~/.bashrc edit below would not repair it at all.
+  if [ "$login" != REACHABLE ] && [ "$inter" != REACHABLE ]; then
+    echo "  NEITHER a login shell nor an ordinary terminal can find it, so no startup" >&2
+    echo "  file puts it on PATH. That is the expected state for a bindir outside" >&2
+    echo "  ~/.local/bin, which Debian's ~/.profile is the only thing that adds." >&2
+  elif [ "$inter" != REACHABLE ]; then
+    echo "  a login shell finds it and an ordinary terminal does not: ~/.profile adds it," >&2
+    echo "  Debian's ~/.bashrc does not, and only login shells read ~/.profile." >&2
+  else
+    echo "  an ordinary terminal finds it and a LOGIN shell does not. The remedy below" >&2
+    echo "  writes to ~/.bashrc, which login shells reach only because Debian's" >&2
+    echo "  ~/.profile sources it -- so if yours does not, or you have a ~/.bash_profile" >&2
+    echo "  shadowing ~/.profile, fix that file instead." >&2
+  fi
+
   if [ -n "$root" ]; then
     echo "  fix: $(movian_sdk_shquote "$root")/install.sh --fix-path" >&2
   else
@@ -159,25 +190,52 @@ movian_sdk_explain_unreachable() {
 # --- the managed block -----------------------------------------------------
 
 movian_sdk_block_text() {
-  local bindir="$1"
+  local bindir="$1" quoted
+  # The path is written as shell DATA, never interpolated into shell code. A
+  # bindir is user-supplied via MOVIAN_SDK_BINDIR, and a component like
+  # `$(touch /tmp/pwned)` would otherwise be substituted on every interactive
+  # shell start -- verified doing exactly that before this was quoted. Glob
+  # characters mattered too: unquoted in the `[[` pattern they would change the
+  # membership test rather than be compared literally.
+  quoted="$(printf '%q' "$bindir")"
   # Guarded on MEMBERSHIP, not on the directory existing. Debian's own stanza
   # guards on existence, which re-prepends in every nested shell: measured 1, 2,
   # 3 entries at nesting depth 1, 2, 3. Above the interactive guard that stanza
   # would run in more shells still, so its form cannot be reused here.
   cat <<EOF
 $MOVIAN_SDK_BLOCK_BEGIN
-if [[ ":\$PATH:" != *":$bindir:"* ]]; then
-  PATH="$bindir:\$PATH"
+movian_sdk_bin=$quoted
+if [[ ":\$PATH:" != *":\$movian_sdk_bin:"* ]]; then
+  PATH="\$movian_sdk_bin:\$PATH"
 fi
+unset movian_sdk_bin
 $MOVIAN_SDK_BLOCK_END
 
 EOF
 }
 
 
-# Strip the block from stdin. Exact inverse of insertion, INCLUDING the single
+# Are the markers a complete, ordered pair? Returns 0 for a well-formed file
+# (zero or one intact block), 1 otherwise.
+#
+# This is a guard against DESTROYING the file. If a user deleted the END marker,
+# a naive strip treats everything after BEGIN as block body and discards it: on
+# a stock ~/.bashrc that is 117 lines in and 3 lines out, silently, from a
+# command whose entire job is to remove five lines.
+movian_sdk_block_wellformed() {
+  awk -v b="$MOVIAN_SDK_BLOCK_BEGIN" -v e="$MOVIAN_SDK_BLOCK_END" '
+    $0 == b { if (open) { bad = 1 } ; open = 1; nb++ ; next }
+    $0 == e { if (!open) { bad = 1 } ; open = 0; ne++ ; next }
+    END { exit (bad || open || nb > 1 || nb != ne) ? 1 : 0 }
+  ' "$1"
+}
+
+
+# Strip the block from a file. Exact inverse of insertion, INCLUDING the single
 # blank line written after END -- dropping only the body leaves the file one
 # line longer on every apply/remove cycle. The prototype (#40) caught that.
+#
+# Callers must have passed movian_sdk_block_wellformed first; this assumes it.
 movian_sdk_block_strip() {
   awk -v b="$MOVIAN_SDK_BLOCK_BEGIN" -v e="$MOVIAN_SDK_BLOCK_END" '
     $0 == b { inblock = 1; next }
@@ -185,7 +243,7 @@ movian_sdk_block_strip() {
     inblock { next }
     eat     { eat = 0; if ($0 == "") next }
     { print }
-  '
+  ' "$1"
 }
 
 
@@ -195,10 +253,34 @@ movian_sdk_block_strip() {
 # prepends its own UNGUARDED line, which runs after ours. No guard written here
 # can prevent that, so #34's "idempotent" has to be read as in-the-file.
 movian_sdk_fix_path() {
-  local rc_file="$1" bindir="$2" mode="${3:-apply}" tmp stripped
+  local rc_file="$1" bindir="$2" mode="${3:-apply}" tmp stripped backup
   [ -f "$rc_file" ] || { echo "error: $(movian_sdk_shquote "$rc_file") does not exist" >&2; return 1; }
 
-  stripped="$(movian_sdk_block_strip < "$rc_file")"
+  # Refuse to touch a file whose markers are damaged, rather than interpret the
+  # damage. Removing five lines must never be able to delete the file's tail.
+  if ! movian_sdk_block_wellformed "$rc_file"; then
+    echo "error: the Movian SDK markers in $(movian_sdk_shquote "$rc_file") are damaged" >&2
+    echo "  expected at most one intact block, opened by" >&2
+    echo "    $MOVIAN_SDK_BLOCK_BEGIN" >&2
+    echo "  and closed by" >&2
+    echo "    $MOVIAN_SDK_BLOCK_END" >&2
+    echo "  refusing to edit: interpreting a half-open block would discard everything" >&2
+    echo "  after it. fix: repair or delete the markers by hand, then rerun." >&2
+    return 1
+  fi
+
+  stripped="$(movian_sdk_block_strip "$rc_file")"
+
+  # Back up before the first modification. This is a file the user owns, and the
+  # SDK's own discipline for files it merely installs is already "never clobber
+  # silently" (install.sh install_file).
+  #
+  # Deliberately NOT an atomic rename: ~/.bashrc is very often a symlink into a
+  # dotfiles repository, and `mv` over it replaces the symlink with a regular
+  # file -- verified. Redirection writes THROUGH the symlink and keeps such a
+  # setup working, and the backup covers what atomicity was meant to protect.
+  backup="$rc_file.movian-sdk.bak"
+  [ -e "$backup" ] || cp -p "$rc_file" "$backup"
 
   if [ "$mode" = remove ]; then
     if ! grep -qxF "$MOVIAN_SDK_BLOCK_BEGIN" "$rc_file"; then
@@ -206,7 +288,7 @@ movian_sdk_fix_path() {
       return 0
     fi
     printf '%s\n' "$stripped" > "$rc_file"
-    echo "  removed the Movian SDK block from $rc_file"
+    echo "  removed the Movian SDK block from $rc_file (backup: $backup)"
     return 0
   fi
 
@@ -224,14 +306,20 @@ movian_sdk_fix_path() {
   fi
 
   tmp="$(mktemp)"
-  # The blank line is emitted here rather than carried in block_text: `$( )`
-  # strips trailing newlines, so a separator baked into the heredoc is lost and
-  # the block ends up butted against the guard. block_strip eats exactly one
-  # blank after END, so emitting it here keeps removal an exact inverse.
-  printf '%s\n' "$stripped" | awk -v anchor="$MOVIAN_SDK_GUARD_ANCHOR" -v block="$(movian_sdk_block_text "$bindir")" '
-    !done && $0 == anchor { printf "%s\n\n", block; done = 1 }
-    { print }
-  ' > "$tmp"
+  # Split at the anchor and splice, rather than passing the block through
+  # `awk -v`. awk processes escape sequences in a -v assignment, so it UNDOES
+  # the `printf %q` quoting of the bindir -- a path containing $(...) was
+  # written back as live code and executed on every interactive shell start.
+  # head/tail never reinterprets what it copies.
+  local n
+  n="$(printf '%s\n' "$stripped" | grep -nxF -m1 "$MOVIAN_SDK_GUARD_ANCHOR" | cut -d: -f1)"
+  {
+    printf '%s\n' "$stripped" | head -n "$((n - 1))"
+    # The trailing blank line is emitted by block_text's heredoc; block_strip
+    # eats exactly one blank after END, which keeps removal an exact inverse.
+    movian_sdk_block_text "$bindir"
+    printf '%s\n' "$stripped" | tail -n "+$n"
+  } > "$tmp"
   cat "$tmp" > "$rc_file"
   rm -f "$tmp"
   echo "  wrote the Movian SDK block into $rc_file (above the interactive guard)"

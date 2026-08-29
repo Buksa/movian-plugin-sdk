@@ -113,9 +113,20 @@ fi
 # turn the locator's "no Movian core configured" into "has no usable core key".
 if [ -f "$config" ]; then
   tmpcfg="$(mktemp)"
-  jq --arg bin "$bindir" '. + {bin: $bin}' "$config" > "$tmpcfg" && cat "$tmpcfg" > "$config"
+  # Report the merge honestly. `jq ... && cat ...` swallows a jq failure -- it
+  # is not the last command of the AND-list, so `set -e` does not fire -- and
+  # the script would then print that the bindir was recorded when the config
+  # was untouched, leaving the skills' fallback with no "bin" key to read.
+  if jq --arg bin "$bindir" '. + {bin: $bin}' "$config" > "$tmpcfg" 2>/dev/null; then
+    cat "$tmpcfg" > "$config"
+    echo "  recorded bin -> $bindir in $config"
+  else
+    echo "  WARNING: could not record bin in $config" >&2
+    echo "  it is not valid JSON, or jq is unavailable. The skills resolve mdev" >&2
+    echo "  through this key, so fix the file and rerun:" >&2
+    echo "    {\"core\": \"/abs/path/to/movian\", \"bin\": \"$bindir\"}" >&2
+  fi
   rm -f "$tmpcfg"
-  echo "  recorded bin -> $bindir in $config"
 fi
 
 # The reachability question, asked of the shells that will RUN mdev rather than

@@ -20,6 +20,7 @@ Needs no Movian core and no SDK configuration. It needs git, bash, jq, awk and
 Python, and writes synthetic homes under TMPDIR.
 """
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -252,7 +253,9 @@ def case_installer_warns_where_it_used_to_be_silent(tmp):
     r = subprocess.run(["/bin/bash", "-lc", f'"{INSTALLER}"'], env=env,
                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT, text=True, timeout=120)
-    ok("it warns", "not reachable from the shells that will run mdev" in r.stdout, True)
+    ok("it warns", "not reachable from every shell that will run mdev" in r.stdout, True)
+    ok("and names the shape that failed, not a fixed story",
+       "an ordinary terminal does not" in r.stdout, True)
     ok("it names a runnable fix", "install.sh --fix-path" in r.stdout, True)
     ok("and does not gate", r.returncode, 0)
 
@@ -279,6 +282,108 @@ def case_printed_fix_actually_works(tmp):
     ok("and the installer now says so", "interactive    REACHABLE" in r.stdout, True)
 
 
+# --- cases added from the Codex review of PR #42 ---------------------------
+
+def case_legacy_config_does_not_resolve_to_slash_mdev(tmp):
+    print("a config predating the bin key resolves to nothing, not to /mdev")
+    home, _ = fixture(tmp)
+    cfg = home / ".config" / "movian-sdk" / "config.json"
+    cfg.write_text('{\n  "core": "/some/core"\n}\n')
+    # The expression the seven skill preambles tell an agent to run. Plain
+    # `.bin + "/mdev"` yields the string "/mdev" here -- jq's null + string --
+    # so the agent would take a nonexistent root-level path for the shim, with
+    # a zero exit status, in exactly the session the preamble exists for.
+    r = subprocess.run(
+        ["/bin/bash", "-c",
+         f'jq -er \'.bin // empty | . + "/mdev"\' "{cfg}"'],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    ok("prints nothing", r.stdout.strip(), "")
+    ok("and fails", r.returncode != 0, True)
+    ok("movian_sdk_bindir also refuses",
+       sh('movian_sdk_bindir || echo NONE', home,
+          extra_env={"MOVIAN_SDK_CONFIG": str(cfg)}).stdout.strip(), "NONE")
+
+
+def case_bindir_is_written_as_data_not_code(tmp):
+    print("a bindir with shell metacharacters is data, never executed")
+    home, _ = fixture(tmp)
+    canary = pathlib.Path(tmp) / "CANARY"
+    evil = f"/tmp/$(touch {canary})/bin"
+    sh(f'movian_sdk_fix_path "$HOME/.bashrc" {shlex.quote(evil)} apply', home)
+    subprocess.run(["/bin/bash", "-ic", "true"],
+                   env={"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb"},
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL, timeout=30)
+    ok("no command substitution fired", canary.exists(), False)
+
+
+def case_damaged_markers_refuse_rather_than_truncate(tmp):
+    print("a half-open block is refused, not interpreted")
+    home, bindir = fixture(tmp)
+    original = (home / ".bashrc").read_text()
+    lines = original.splitlines(True)
+    # The user kept BEGIN and deleted END. A naive strip treats the whole tail
+    # as block body: 117 lines in, 3 out, from a command meant to remove five.
+    lines.insert(4, BEGIN + "\nPATH=/x:$PATH\n")
+    (home / ".bashrc").write_text("".join(lines))
+    damaged = (home / ".bashrc").read_text()
+    for mode in ("remove", "apply"):
+        r = sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir}" {mode} || true', home)
+        ok(f"{mode} refuses", "markers" in r.stderr and "refusing to edit" in r.stderr, True)
+        ok(f"{mode} left the file untouched", (home / ".bashrc").read_text(), damaged)
+
+
+def case_the_diagnosis_names_the_shape_that_failed(tmp):
+    print("the warning describes the shell that actually failed")
+    home, bindir = fixture(tmp)
+    # The reverse of #34: ~/.bashrc provides the path, ~/.profile does not.
+    (home / ".bashrc").write_text(f'PATH="{bindir}:$PATH"\n')
+    (home / ".profile").write_text("")
+    r = sh(f'movian_sdk_reachability_report "{bindir}"\n'
+           f'movian_sdk_explain_unreachable "{bindir}" "" "$MOVIAN_SDK_REACH_WORST"', home)
+    ok("login is the failing shape", "reachable: login          UNREACHABLE" in r.stdout, True)
+    ok("and the message says so, not the opposite",
+       "a LOGIN shell does not" in r.stderr, True)
+    ok("it does not claim terminals are broken",
+       "an ordinary terminal answers" in r.stderr, False)
+
+
+def case_a_backup_is_taken_before_the_first_edit(tmp):
+    print("the user's startup file is backed up, and a symlink stays a symlink")
+    home, bindir = fixture(tmp)
+    real = pathlib.Path(tmp) / "dotfiles-bashrc"
+    shutil.move(str(home / ".bashrc"), real)
+    (home / ".bashrc").symlink_to(real)          # as stow/chezmoi would leave it
+    before = real.read_text()
+    sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir}" apply', home)
+    ok("backup exists", (home / ".bashrc.movian-sdk.bak").is_file(), True)
+    ok("backup holds the original",
+       (home / ".bashrc.movian-sdk.bak").read_text() == before, True)
+    # An atomic rename would replace the symlink with a regular file, breaking a
+    # dotfiles repository. Redirection writes through it.
+    ok("still a symlink", (home / ".bashrc").is_symlink(), True)
+    ok("the dotfiles file itself was updated", BEGIN in real.read_text(), True)
+
+
+def case_installer_reports_a_failed_merge(tmp):
+    print("install.sh does not claim to have recorded bin when it could not")
+    home, bindir = fixture(tmp, with_mdev=False)
+    cfg = home / ".config" / "movian-sdk" / "config.json"
+    cfg.write_text("this is not json\n")
+    env = {
+        "HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb",
+        "MOVIAN_SDK_BINDIR": str(bindir),
+        "MOVIAN_SDK_LIBDIR": str(home / ".local/lib/movian-sdk"),
+        "MOVIAN_SDK_CONFIG": str(cfg),
+    }
+    r = subprocess.run(["/bin/bash", str(INSTALLER)], env=env, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                       timeout=120)
+    ok("it warns", "could not record bin" in r.stdout, True)
+    ok("it does not claim success", "recorded bin ->" in r.stdout, False)
+    ok("the broken config is left alone", cfg.read_text(), "this is not json\n")
+
+
 def main():
     if not SKEL.joinpath(".bashrc").is_file():
         print(f"reachable_selftest: SKIP -- {SKEL}/.bashrc is absent, so there is no")
@@ -299,6 +404,13 @@ def main():
         case_installer_records_bin,
         case_installer_warns_where_it_used_to_be_silent,
         case_printed_fix_actually_works,
+        # from the Codex review of PR #42
+        case_legacy_config_does_not_resolve_to_slash_mdev,
+        case_bindir_is_written_as_data_not_code,
+        case_damaged_markers_refuse_rather_than_truncate,
+        case_the_diagnosis_names_the_shape_that_failed,
+        case_a_backup_is_taken_before_the_first_edit,
+        case_installer_reports_a_failed_merge,
     ]
     for c in cases:
         with tempfile.TemporaryDirectory() as tmp:

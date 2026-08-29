@@ -14,11 +14,17 @@ description: Judge whether a Movian plugin change actually works — what counts
 > installer recorded and use that path for the rest of the session:
 >
 > ```sh
-> command -v mdev || jq -r '.bin + "/mdev"' ~/.config/movian-sdk/config.json
+> command -v mdev || jq -er '.bin // empty | . + "/mdev"' ~/.config/movian-sdk/config.json
 > ```
 >
-> If neither answers, the SDK is not installed here — say so rather than guessing
-> a path: `cd movian-plugin-sdk && ./install.sh /abs/path/to/movian/checkout`.
+> `jq -er` and `// empty` are both load-bearing. A config written before the `bin`
+> key existed contains only `core`, and plain `.bin + "/mdev"` would print
+> **`/mdev`** — a nonexistent path, reported as success, in exactly the session
+> this preamble exists for. As written it produces nothing and a non-zero status.
+>
+> If neither answers, the SDK is not installed or predates this key — say so
+> rather than guessing a path, and rerun the installer:
+> `cd movian-plugin-sdk && ./install.sh /abs/path/to/movian/checkout`.
 > This preamble is repeated in every `movian:*` skill on purpose, because skills
 > load individually and you may be holding only this one.
 
