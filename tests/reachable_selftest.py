@@ -34,7 +34,17 @@ LIB = HERE.parent / "lib" / "reachable.sh"
 INSTALLER = HERE.parent / "install.sh"
 SKEL = pathlib.Path("/etc/skel")
 
+# Vendored verbatim from Debian's `bash` package, /etc/skel. Byte-identical
+# across Debian 9-13 and Ubuntu 18.04-24.04 (see research/debian-path-and-dotfiles.md).
+# Embedded so the suite RUNS on a machine without /etc/skel instead of skipping
+# into a vacuous pass -- and `case_the_vendored_skel_matches_the_distribution`
+# fails if the distribution's copy ever diverges from this one.
+SKEL_BASHRC = '# ~/.bashrc: executed by bash(1) for non-login shells.\n# see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)\n# for examples\n\n# If not running interactively, don\'t do anything\ncase $- in\n    *i*) ;;\n      *) return;;\nesac\n\n# don\'t put duplicate lines or lines starting with space in the history.\n# See bash(1) for more options\nHISTCONTROL=ignoreboth\n\n# append to the history file, don\'t overwrite it\nshopt -s histappend\n\n# for setting history length see HISTSIZE and HISTFILESIZE in bash(1)\nHISTSIZE=1000\nHISTFILESIZE=2000\n\n# check the window size after each command and, if necessary,\n# update the values of LINES and COLUMNS.\nshopt -s checkwinsize\n\n# If set, the pattern "**" used in a pathname expansion context will\n# match all files and zero or more directories and subdirectories.\n#shopt -s globstar\n\n# make less more friendly for non-text input files, see lesspipe(1)\n[ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"\n\n# set variable identifying the chroot you work in (used in the prompt below)\nif [ -z "${debian_chroot:-}" ] && [ -r /etc/debian_chroot ]; then\n    debian_chroot=$(cat /etc/debian_chroot)\nfi\n\n# set a fancy prompt (non-color, unless we know we "want" color)\ncase "$TERM" in\n    xterm-color|*-256color) color_prompt=yes;;\nesac\n\n# uncomment for a colored prompt, if the terminal has the capability; turned\n# off by default to not distract the user: the focus in a terminal window\n# should be on the output of commands, not on the prompt\n#force_color_prompt=yes\n\nif [ -n "$force_color_prompt" ]; then\n    if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then\n\t# We have color support; assume it\'s compliant with Ecma-48\n\t# (ISO/IEC-6429). (Lack of such support is extremely rare, and such\n\t# a case would tend to support setf rather than setaf.)\n\tcolor_prompt=yes\n    else\n\tcolor_prompt=\n    fi\nfi\n\nif [ "$color_prompt" = yes ]; then\n    PS1=\'${debian_chroot:+($debian_chroot)}\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ \'\nelse\n    PS1=\'${debian_chroot:+($debian_chroot)}\\u@\\h:\\w\\$ \'\nfi\nunset color_prompt force_color_prompt\n\n# If this is an xterm set the title to user@host:dir\ncase "$TERM" in\nxterm*|rxvt*)\n    PS1="\\[\\e]0;${debian_chroot:+($debian_chroot)}\\u@\\h: \\w\\a\\]$PS1"\n    ;;\n*)\n    ;;\nesac\n\n# enable color support of ls and also add handy aliases\nif [ -x /usr/bin/dircolors ]; then\n    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"\n    alias ls=\'ls --color=auto\'\n    #alias dir=\'dir --color=auto\'\n    #alias vdir=\'vdir --color=auto\'\n\n    alias grep=\'grep --color=auto\'\n    alias fgrep=\'fgrep --color=auto\'\n    alias egrep=\'egrep --color=auto\'\nfi\n\n# colored GCC warnings and errors\n#export GCC_COLORS=\'error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01\'\n\n# some more ls aliases\nalias ll=\'ls -alF\'\nalias la=\'ls -A\'\nalias l=\'ls -CF\'\n\n# Add an "alert" alias for long running commands.  Use like so:\n#   sleep 10; alert\nalias alert=\'notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e \'\\\'\'s/^\\s*[0-9]\\+\\s*//;s/[;&|]\\s*alert$//\'\\\'\')"\'\n\n# Alias definitions.\n# You may want to put all your additions into a separate file like\n# ~/.bash_aliases, instead of adding them here directly.\n# See /usr/share/doc/bash-doc/examples in the bash-doc package.\n\nif [ -f ~/.bash_aliases ]; then\n    . ~/.bash_aliases\nfi\n\n# enable programmable completion features (you don\'t need to enable\n# this, if it\'s already enabled in /etc/bash.bashrc and /etc/profile\n# sources /etc/bash.bashrc).\nif ! shopt -oq posix; then\n  if [ -f /usr/share/bash-completion/bash_completion ]; then\n    . /usr/share/bash-completion/bash_completion\n  elif [ -f /etc/bash_completion ]; then\n    . /etc/bash_completion\n  fi\nfi\n'
+
+SKEL_PROFILE = '# ~/.profile: executed by the command interpreter for login shells.\n# This file is not read by bash(1), if ~/.bash_profile or ~/.bash_login\n# exists.\n# see /usr/share/doc/bash/examples/startup-files for examples.\n# the files are located in the bash-doc package.\n\n# the default umask is set in /etc/profile; for setting the umask\n# for ssh logins, install and configure the libpam-umask package.\n#umask 022\n\n# if running bash\nif [ -n "$BASH_VERSION" ]; then\n    # include .bashrc if it exists\n    if [ -f "$HOME/.bashrc" ]; then\n\t. "$HOME/.bashrc"\n    fi\nfi\n\n# set PATH so it includes user\'s private bin if it exists\nif [ -d "$HOME/bin" ] ; then\n    PATH="$HOME/bin:$PATH"\nfi\n\n# set PATH so it includes user\'s private bin if it exists\nif [ -d "$HOME/.local/bin" ] ; then\n    PATH="$HOME/.local/bin:$PATH"\nfi\n'
+
 BEGIN = "# >>> BEGIN MOVIAN SDK PATH >>>"
+END = "# <<< END MOVIAN SDK PATH <<<"
 GUARD = "# If not running interactively, don't do anything"
 
 FAILURES = []
@@ -145,10 +155,10 @@ def fixture(tmp, *, anchor=True, with_mdev=True):
     (home / ".local" / "bin").mkdir(parents=True)
     (home / ".config" / "movian-sdk").mkdir(parents=True)
     if anchor:
-        shutil.copy(SKEL / ".bashrc", home / ".bashrc")
+        (home / ".bashrc").write_text(SKEL_BASHRC)
     else:
         (home / ".bashrc").write_text("# a bashrc the user rewrote\nHISTSIZE=1000\n")
-    shutil.copy(SKEL / ".profile", home / ".profile")
+    (home / ".profile").write_text(SKEL_PROFILE)
     bindir = home / ".local" / "bin"
     if with_mdev:
         mdev = bindir / "mdev"
@@ -703,13 +713,98 @@ def case_the_seven_preambles_are_identical(tmp):
     ok("and they are all the same", len(set(blocks.values())), 1)
 
 
-def main():
-    if not SKEL.joinpath(".bashrc").is_file():
-        print(f"reachable_selftest: SKIP -- {SKEL}/.bashrc is absent, so there is no")
-        print("  Debian-shaped fixture to build. This suite asserts against the")
-        print("  dotfiles the distribution ships, not against invented ones.")
-        return 0
+def case_the_vendored_skel_matches_the_distribution(tmp):
+    """The embedded dotfiles must stay what Debian actually ships.
 
+    Vendoring is what lets this suite run anywhere; it must not become licence
+    to invent. Where /etc/skel exists, the copies are compared byte for byte, so
+    a divergence is a failure rather than a silent drift into fiction. Where it
+    does not exist, this case says so plainly instead of passing quietly.
+    """
+    print("the vendored skel is the distribution's, not an invention")
+    if not (SKEL / ".bashrc").is_file():
+        print(f"  note  {SKEL}/.bashrc absent -- fidelity unverifiable on this host,")
+        print("        the other cases still run against the vendored copy")
+        return
+    ok("vendored .bashrc matches /etc/skel",
+       (SKEL / ".bashrc").read_text() == SKEL_BASHRC, True)
+    ok("vendored .profile matches /etc/skel",
+       (SKEL / ".profile").read_text() == SKEL_PROFILE, True)
+    # The properties the rest of the suite leans on, asserted rather than assumed.
+    ok(".bashrc carries the interactive guard", GUARD in SKEL_BASHRC, True)
+    ok(".profile adds ~/.local/bin", '"$HOME/.local/bin"' in SKEL_PROFILE, True)
+    ok(".bashrc does NOT add it -- the whole point of #34",
+       "$HOME/.local/bin" in SKEL_BASHRC, False)
+
+
+# --- cases from the GPT-5.6-Luna review round --------------------------------
+
+def case_a_colon_in_the_bindir_is_refused(tmp):
+    """PATH is colon-separated, so such a directory cannot be represented in it."""
+    print("a bindir containing ':' is refused, not silently misread")
+    home, _ = fixture(tmp)
+    r = sh('movian_sdk_normalise_bindir "/opt/a:b/bin" || echo REFUSED', home)
+    ok("refused", "REFUSED" in r.stdout, True)
+    ok("and says why", "separates PATH entries" in r.stderr, True)
+
+
+def case_marker_whitespace_is_not_damage(tmp):
+    """Trailing whitespace on a marker is an editor artefact, not corruption.
+
+    Matching markers exactly made an intact block look half-open, so the
+    data-loss guard refused every edit -- a false positive on the one check
+    whose whole job is to prevent data loss.
+    """
+    print("a marker with trailing whitespace is still a valid marker")
+    home, bindir = fixture(tmp)
+    before = (home / ".bashrc").read_text()
+    sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir}" apply', home)
+    text = (home / ".bashrc").read_text()
+    (home / ".bashrc").write_text(text.replace(END + "\n", END + "   \n"))
+    r = sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir}" remove', home)
+    ok("removal is not refused", "are damaged" in r.stderr, False)
+    ok("the block is gone", BEGIN in (home / ".bashrc").read_text(), False)
+    ok("and the rest of the file survived",
+       (home / ".bashrc").read_text() == before, True)
+
+
+def case_diagnosis_without_a_prior_report_says_so(tmp):
+    """Unmeasured is not unreachable, even when the function is called alone."""
+    print("called with no measurement, the diagnosis states that instead of guessing")
+    home, _ = fixture(tmp)
+    r = sh('movian_sdk_explain_unreachable /opt/bin "" UNREACHABLE', home)
+    ok("it says nothing was measured",
+       "no per-shape measurement is available" in r.stderr, True)
+    ok("and invents no verdict about login",
+       "a login shell finds it" in r.stderr, False)
+    ok("nor about the terminal shape",
+       "an ordinary terminal does not" in r.stderr, False)
+
+
+def case_a_shim_run_from_the_checkout_finds_its_library(tmp):
+    """`./bin/mdev` is what a developer types; it used to die under $HOME.
+
+    The library directory was assumed to live under ~/.local regardless of where
+    the shim itself was, so a shim run straight from the checkout failed with a
+    bare "No such file or directory" from the `source` line.
+    """
+    print("a shim run from the checkout derives its own library directory")
+    shim = HERE.parent / "bin" / "mdev"
+    env = {k: v for k, v in os.environ.items() if k != "MOVIAN_SDK_LIB"}
+    env["HOME"] = "/nonexistent-home-for-this-case"
+    r = subprocess.run(["/bin/bash", str(shim), "core"], env=env,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE, text=True, timeout=60)
+    ok("it does not die looking under $HOME",
+       "No such file or directory" in r.stderr, False)
+
+
+def main():
+    # No SKIP path. The suite used to return success when /etc/skel was absent,
+    # so on a minimal container or a non-Debian host it reported OK without
+    # exercising a single line of the implementation -- a vacuous pass, which is
+    # worse than a failure because it looks like coverage. The skel content is
+    # vendored above instead, and its fidelity is itself a case.
     cases = [
         case_reproduces_34,
         case_block_makes_it_reachable,
@@ -740,6 +835,12 @@ def main():
         case_a_large_bashrc_still_gets_fixed,
         case_path_scrub_does_not_glob,
         case_the_seven_preambles_are_identical,
+        case_the_vendored_skel_matches_the_distribution,
+        # from the GPT-5.6-Luna review round
+        case_a_colon_in_the_bindir_is_refused,
+        case_marker_whitespace_is_not_damage,
+        case_diagnosis_without_a_prior_report_says_so,
+        case_a_shim_run_from_the_checkout_finds_its_library,
     ]
     for c in cases:
         with tempfile.TemporaryDirectory() as tmp:

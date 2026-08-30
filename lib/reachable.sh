@@ -68,6 +68,13 @@ movian_sdk_normalise_bindir() {
   local dir="$1"
   case "$dir" in
     "") echo "error: empty bindir" >&2; return 1 ;;
+    # PATH is colon-separated, so a directory containing a colon cannot be
+    # represented in it at all -- neither the scrub nor the membership guard the
+    # block writes could tell it from two shorter entries. Refuse rather than
+    # write something that silently means something else.
+    *:*) echo "error: bindir must not contain ':', which separates PATH entries" >&2
+         echo "  got $(movian_sdk_shquote "$dir")" >&2
+         return 1 ;;
     /*) ;;
     *)  echo "error: bindir must be an absolute path, got $(movian_sdk_shquote "$dir")" >&2
         echo "  a relative directory written into ~/.bashrc lands at the front of PATH" >&2
@@ -228,6 +235,20 @@ movian_sdk_explain_unreachable() {
   local login="${MOVIAN_SDK_REACH_LOGIN:-}" inter="${MOVIAN_SDK_REACH_INTERACTIVE:-}"
   echo "warning: $(movian_sdk_shquote "$bindir") is not reachable from every shell that will run mdev" >&2
 
+  # Called without a preceding report, the per-shape variables are empty. Empty
+  # is not "unreachable" -- it is "nothing was measured" -- and treating it as a
+  # verdict produced a confident diagnosis from no data at all.
+  if [ -z "$login" ] && [ -z "$inter" ]; then
+    echo "  no per-shape measurement is available, so which shell fails is not stated." >&2
+    echo "  run movian_sdk_reachability_report first, or use \`mdev doctor\`." >&2
+    if [ -n "$root" ]; then
+      echo "  fix: $(movian_sdk_shquote "$root")/install.sh --fix-path" >&2
+    else
+      echo "  fix: rerun this repository's ./install.sh --fix-path" >&2
+    fi
+    return 0
+  fi
+
   # An UNDETERMINED shape was never measured, so nothing may be asserted about
   # it. Saying "a login shell finds it" when the login probe was killed states
   # a fact that was not established -- the same class of confident wrong answer
@@ -310,10 +331,25 @@ EOF
 # a stock ~/.bashrc that is 117 lines in and 3 lines out, silently, from a
 # command whose entire job is to remove five lines.
 movian_sdk_block_wellformed() {
+  # Trailing whitespace on a marker is an editor artefact, not damage. Matching
+  # it exactly made an otherwise intact block look half-open and refused every
+  # edit -- a false positive on the one check whose job is to prevent data loss.
   awk -v b="$MOVIAN_SDK_BLOCK_BEGIN" -v e="$MOVIAN_SDK_BLOCK_END" '
-    $0 == b { if (open) { bad = 1 } ; open = 1; nb++ ; next }
-    $0 == e { if (!open) { bad = 1 } ; open = 0; ne++ ; next }
+    { line = $0; sub(/[ \t]+$/, "", line) }
+    line == b { if (open) { bad = 1 } ; open = 1; nb++ ; next }
+    line == e { if (!open) { bad = 1 } ; open = 0; ne++ ; next }
     END { exit (bad || open || nb > 1 || nb != ne) ? 1 : 0 }
+  ' "$1"
+}
+
+
+# Is a managed block present? Tolerant of trailing whitespace, like the
+# well-formedness check.
+movian_sdk_has_block() {
+  awk -v b="$MOVIAN_SDK_BLOCK_BEGIN" '
+    { line = $0; sub(/[ \t]+$/, "", line) }
+    line == b { found = 1 }
+    END { exit found ? 0 : 1 }
   ' "$1"
 }
 
@@ -325,8 +361,9 @@ movian_sdk_block_wellformed() {
 # Callers must have passed movian_sdk_block_wellformed first; this assumes it.
 movian_sdk_block_strip() {
   awk -v b="$MOVIAN_SDK_BLOCK_BEGIN" -v e="$MOVIAN_SDK_BLOCK_END" '
-    $0 == b { inblock = 1; next }
-    $0 == e { inblock = 0; eat = 1; next }
+    { line = $0; sub(/[ \t]+$/, "", line) }
+    line == b { inblock = 1; next }
+    line == e { inblock = 0; eat = 1; next }
     inblock { next }
     eat     { eat = 0; if ($0 == "") next }
     { print }
@@ -361,7 +398,7 @@ movian_sdk_fix_path() {
   # Nothing to do is not a modification. Creating a backup here let a no-op
   # `--unfix-path` claim the single backup slot, so every LATER real edit
   # announced a backup that predated nothing.
-  if [ "$mode" = remove ] && ! grep -qxF "$MOVIAN_SDK_BLOCK_BEGIN" "$rc_file"; then
+  if [ "$mode" = remove ] && ! movian_sdk_has_block "$rc_file"; then
     echo "  no Movian SDK block in $rc_file -- nothing to remove"
     return 0
   fi
