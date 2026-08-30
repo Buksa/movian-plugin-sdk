@@ -3,6 +3,17 @@
 # Contract: movian-plugin-sdk#3. Stood up by movian-plugin-sdk#12.
 set -euo pipefail
 
+# Derived from where THIS file lives, not assumed under $HOME. install.sh still
+# stamps an absolute default below, but a shim run straight from the checkout --
+# `./bin/mdev doctor`, which is what a developer types -- used to look for its
+# resolver under ~/.local and die with a bare "No such file or directory".
+if [ -z "${MOVIAN_SDK_LIB:-}" ]; then
+  _mdev_self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  for _cand in "$_mdev_self/../lib/movian-sdk" "$_mdev_self/../lib"; do
+    if [ -f "$_cand/locate.sh" ]; then MOVIAN_SDK_LIB="$(cd "$_cand" && pwd -P)"; break; fi
+  done
+  unset _mdev_self _cand
+fi
 MOVIAN_SDK_LIB="${MOVIAN_SDK_LIB:-$HOME/.local/lib/movian-sdk}"  # rewritten by install.sh
 MOVIAN_SDK_ROOT="${MOVIAN_SDK_ROOT:-}"                           # rewritten by install.sh
 . "$MOVIAN_SDK_LIB/locate.sh"
@@ -146,6 +157,45 @@ if [ "${1:-}" = "doctor" ]; then
       printf '%s\n' "$floor" | tail -n +2
       rc=1
     fi
+  fi
+
+  # Reachability, from the SAME check install.sh runs — one implementation, two
+  # callers (movian-plugin-sdk#38). `doctor` is the caller that can be re-run
+  # after the user edits a dotfile, which the installer cannot.
+  if [ -f "$MOVIAN_SDK_LIB/reachable.sh" ]; then
+    . "$MOVIAN_SDK_LIB/reachable.sh"
+    # `pwd -P` and the same normalisation the recorded value went through, so a
+    # symlinked bindir or a trailing slash is not reported as a MISMATCH when
+    # both names denote one directory.
+    self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+    if recorded="$(movian_sdk_bindir)"; then
+      recorded="$(movian_sdk_normalise_bindir "$recorded" 2>/dev/null || printf '%s' "$recorded")"
+      recorded_real="$(cd "$recorded" 2>/dev/null && pwd -P)" || recorded_real="$recorded"
+      # The one honest check available for the agent's `bash -c`, whose
+      # environment holds no state to inspect: does the bindir agents are
+      # pointed at match the one this invocation actually came from?
+      if [ "$recorded_real" = "$self" ]; then
+        echo "bindir:    $recorded"
+      else
+        echo "bindir:    MISMATCH — recorded $recorded, but this mdev ran from $self"
+        echo "           agents resolve mdev through the recorded path, so they are not"
+        echo "           running what you just ran. Rerun install.sh from the checkout"
+        echo "           you want agents to use."
+        rc=1
+      fi
+    else
+      echo "bindir:    UNRECORDED — rerun install.sh so skills can resolve mdev without PATH"
+      rc=1
+    fi
+    movian_sdk_reachability_report "${recorded:-$self}"
+    if [ "$MOVIAN_SDK_REACH_WORST" != REACHABLE ]; then
+      movian_sdk_explain_unreachable "${recorded:-$self}" "$MOVIAN_SDK_ROOT" \
+        "$MOVIAN_SDK_REACH_WORST"
+    fi
+    # Not counted into rc: reachability is a command, not a gate (#3). And note
+    # what is NOT claimed — that an agent followed the resolution preamble. That
+    # guarantee is documentary, and doctor stays silent rather than implying a
+    # check it did not perform.
   fi
 
   echo

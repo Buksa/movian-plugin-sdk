@@ -17,6 +17,17 @@ if [ -x "$PWD/support/devtools/movian-lsp" ]; then
   exec "$PWD/support/devtools/movian-lsp" "$@"
 fi
 
+# Derived from where THIS file lives, not assumed under $HOME. install.sh still
+# stamps an absolute default below, but a shim run straight from the checkout --
+# `./bin/mdev doctor`, which is what a developer types -- used to look for its
+# resolver under ~/.local and die with a bare "No such file or directory".
+if [ -z "${MOVIAN_SDK_LIB:-}" ]; then
+  _mdev_self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  for _cand in "$_mdev_self/../lib/movian-sdk" "$_mdev_self/../lib"; do
+    if [ -f "$_cand/locate.sh" ]; then MOVIAN_SDK_LIB="$(cd "$_cand" && pwd -P)"; break; fi
+  done
+  unset _mdev_self _cand
+fi
 MOVIAN_SDK_LIB="${MOVIAN_SDK_LIB:-$HOME/.local/lib/movian-sdk}"  # rewritten by install.sh
 . "$MOVIAN_SDK_LIB/locate.sh"
 

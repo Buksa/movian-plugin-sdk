@@ -4,17 +4,56 @@
 # The Claude Code plugin channel delivers skills (markdown) only; `mdev` and
 # `movian-lsp` are executables on PATH, so they need this second channel.
 #
-# Usage:  ./install.sh [/abs/path/to/movian/core/checkout]
+# Usage:  ./install.sh [--fix-path|--unfix-path] [/abs/path/to/movian/core/checkout]
 #
 # The path argument is optional: omit it to install the shims without touching
 # an existing ~/.config/movian-sdk/config.json.
+#
+#   --fix-path    make the shims reachable from ordinary terminals and from
+#                 `ssh host 'mdev ...'`, by writing a delimited managed block
+#                 into ~/.bashrc above its interactive guard. OPT-IN: without
+#                 this flag nothing outside the SDK's own directories is
+#                 touched, only a warning is printed (movian-plugin-sdk#39).
+#   --unfix-path  remove that block again.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bindir="${MOVIAN_SDK_BINDIR:-$HOME/.local/bin}"
 libdir="${MOVIAN_SDK_LIBDIR:-$HOME/.local/lib/movian-sdk}"
 config="${MOVIAN_SDK_CONFIG:-$HOME/.config/movian-sdk/config.json}"
-core="${1:-}"
+
+# This script had no option parsing at all until #34: `$1` was positionally the
+# core path, so `./install.sh --fix-path` would have been read as one and
+# rejected for not being absolute.
+core=""
+fixmode=""
+for arg in "$@"; do
+  case "$arg" in
+    --fix-path)   fixmode=apply ;;
+    --unfix-path) fixmode=remove ;;
+    # Print the header comment, and stop at the first line that is not one.
+    # A fixed line range leaked `set -euo pipefail` and the line after it into
+    # the help text as soon as the header grew.
+    -h|--help)    sed -n '2,/^[^#]/p' "${BASH_SOURCE[0]}" | sed '/^[^#]/d; s/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "error: unknown option '$arg'" >&2; exit 1 ;;
+    *)
+      [ -z "$core" ] || { echo "error: more than one core path given" >&2; exit 1; }
+      core="$arg"
+      ;;
+  esac
+done
+
+# The bindir is validated as strictly as the core path (below), and for a
+# sharper reason: `--fix-path` writes this string into ~/.bashrc, where a
+# relative entry lands at the FRONT of PATH in every shell and resolves against
+# whatever directory the user is in. A `./mybin/git` in any checked-out
+# repository would then run instead of git. Normalising also collapses a
+# trailing slash, which the textual PATH scrub and the `$bindir/mdev`
+# comparison would otherwise treat as a different directory -- reporting a
+# working install as UNREACHABLE.
+. "$here/lib/locate.sh"
+. "$here/lib/reachable.sh"
+bindir="$(movian_sdk_normalise_bindir "$bindir")" || exit 1
 
 mkdir -p "$bindir" "$libdir" "$(dirname "$config")"
 
@@ -42,6 +81,7 @@ install_file() {
 
 echo "Installing Movian SDK shims:"
 install_file "$here/lib/locate.sh" "$libdir/locate.sh"
+install_file "$here/lib/reachable.sh" "$libdir/reachable.sh"
 install_file "$here/lib/viewdoc.py" "$libdir/viewdoc.py"
 install_file "$here/lib/typefloor.py" "$libdir/typefloor.py"
 install_file "$here/bin/mdev" "$bindir/mdev"
@@ -72,13 +112,68 @@ else
   echo "No core configured. Either re-run with the checkout path:"
   echo "    ./install.sh /abs/path/to/movian"
   echo "or write $config yourself:"
-  echo "    {\"core\": \"/abs/path/to/movian\"}"
+  echo "    {\"core\": \"/abs/path/to/movian\", \"bin\": \"$bindir\"}"
+  echo "  the \"bin\" key is how the skills resolve mdev without PATH; a config"
+  echo "  without it makes them report the SDK as not installed."
 fi
 
-case ":$PATH:" in
-  *":$bindir:"*) ;;
-  *) echo; echo "warning: $bindir is not on PATH — add it to use mdev directly." ;;
-esac
+# Record WHERE the shims went. Until #34 nothing on the system knew: `bindir`
+# was a local here, absent from the config and from the shims' own stamps, so
+# anything resolving them had to guess `~/.local/bin` — a guess that fails
+# silently under MOVIAN_SDK_BINDIR, because that variable lives in this shell
+# and is never exported into the agent session that needs it. The skills read
+# this key instead of relying on PATH (movian-plugin-sdk#41).
+#
+# Merged with jq rather than rewritten, so a config carrying "core" keeps it.
+# Only written when a config exists or was just created: an install with no
+# core at all has nothing for mdev to do, and inventing a config here would
+# turn the locator's "no Movian core configured" into "has no usable core key".
+if [ -f "$config" ]; then
+  tmpcfg="$(mktemp)"
+  # Report the merge honestly. `jq ... && cat ...` swallows a jq failure -- it
+  # is not the last command of the AND-list, so `set -e` does not fire -- and
+  # the script would then print that the bindir was recorded when the config
+  # was untouched, leaving the skills' fallback with no "bin" key to read.
+  # The write is guarded too, not just the jq. jq SUCCEEDS on a read-only
+  # config -- it writes to $tmpcfg -- so the failure landed on the unguarded
+  # `cat > "$config"`, and `set -e` aborted the script from INSIDE the branch
+  # meant to report honestly: no WARNING, no reachability report, and $tmpcfg
+  # left behind.
+  if jq --arg bin "$bindir" '. + {bin: $bin}' "$config" > "$tmpcfg" 2>/dev/null &&
+     cat "$tmpcfg" > "$config" 2>/dev/null; then
+    echo "  recorded bin -> $bindir in $config"
+  else
+    echo "  WARNING: could not record bin in $config" >&2
+    echo "  it is not valid JSON, jq is unavailable, or the file is not writable." >&2
+    echo "  The skills resolve mdev through this key, so fix the file and rerun:" >&2
+    echo "    {\"core\": \"/abs/path/to/movian\", \"bin\": \"$bindir\"}" >&2
+  fi
+  rm -f "$tmpcfg"
+fi
+
+# The reachability question, asked of the shells that will RUN mdev rather than
+# of this one. The check it replaces tested `:$PATH:` of the installer's own
+# shell, which is wrong in both directions at once (movian-plugin-sdk#34): it
+# warned from a shell that happened to carry the directory, and stayed silent
+# from a login shell while every ordinary terminal failed.
+# (Both libraries are already sourced above, to validate the bindir before it
+# reaches a directory, a config, or a startup file.)
+
+if [ -n "$fixmode" ]; then
+  echo
+  echo "PATH:"
+  movian_sdk_fix_path "$HOME/.bashrc" "$bindir" "$fixmode"
+fi
+
+echo
+movian_sdk_reachability_report "$bindir"
+if [ "$MOVIAN_SDK_REACH_WORST" != REACHABLE ]; then
+  echo
+  movian_sdk_explain_unreachable "$bindir" "$here" "$MOVIAN_SDK_REACH_WORST"
+fi
+# Deliberately not a gate: the files ARE installed, and reachability is a
+# property of the user's shell configuration. Same ruling as the locator's —
+# a command, not a gate (movian-plugin-sdk#3).
 
 echo
 echo "Verify from any plugin repo (not from the core):"
