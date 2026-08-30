@@ -851,6 +851,64 @@ def case_doctor_is_the_second_caller(tmp):
     ok("and runs the same shared probe", "reachable: login" in r.stdout, True)
 
 
+# --- from a real install on a fresh Debian stand -----------------------------
+
+def case_the_installing_shell_is_told_it_cannot_see_mdev(tmp):
+    """PATH is inherited at exec time; installing cannot change a running shell.
+
+    A user installed successfully, typed `mdev`, got `command not found`, and
+    reasonably asked whether that was expected. It is -- but nothing said so, so
+    a correct install read as a failed one. The notice is printed on every run,
+    because it is true regardless of the reachability verdict, and an
+    UNDETERMINED probe is precisely when the reader is left guessing.
+    """
+    print("the installing shell is told why it cannot see mdev yet")
+    home, bindir = fixture(tmp, with_mdev=False)
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb",
+           "MOVIAN_SDK_BINDIR": str(bindir),
+           "MOVIAN_SDK_LIBDIR": str(home / ".local/lib/movian-sdk"),
+           "MOVIAN_SDK_CONFIG": str(home / ".config/movian-sdk/config.json")}
+    r = subprocess.run(["/bin/bash", str(INSTALLER)], env=env, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                       timeout=180)
+    ok("it says this shell will not see it", "This shell will NOT see mdev" in r.stdout, True)
+    ok("and that this is not a failure", "not a failed install" in r.stdout, True)
+    ok("and how to get a shell that does", 'exec "$SHELL" -l' in r.stdout, True)
+
+    # And it stays quiet when the bindir IS already on the caller's PATH, so the
+    # notice cannot become boilerplate people learn to skip.
+    env["PATH"] = f"{bindir}:/usr/bin:/bin"
+    r = subprocess.run(["/bin/bash", str(INSTALLER)], env=env, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                       timeout=180)
+    ok("silent when the shell can already see it",
+       "This shell will NOT see mdev" in r.stdout, False)
+
+
+def case_undetermined_still_offers_the_remedy(tmp):
+    """A failed measurement must not withhold the fix.
+
+    On a machine whose ~/.bashrc takes longer than the probe budget, the
+    interactive shape came back UNDETERMINED and the diagnosis said only "rerun,
+    or check your ~/.bashrc" -- withholding `--fix-path` from the one reader who
+    could not tell whether they needed it. Unmeasured and broken look identical
+    from the outside, and the remedy is the same either way.
+    """
+    print("an unmeasurable shape still names the remedy and how to measure")
+    home, bindir = fixture(tmp)
+    marker = wedge_marker(home)
+    (home / ".bashrc").write_text(f"{marker}\n")
+    r = sh(f'movian_sdk_reachability_report "{bindir}"\n'
+           f'movian_sdk_explain_unreachable "{bindir}" "/repo" "$MOVIAN_SDK_REACH_WORST"',
+           home, extra_env={"MOVIAN_SDK_PROBE_TIMEOUT": "3"}, timeout=60)
+    kill_survivors(marker)
+    ok("the shape is UNDETERMINED", "interactive    UNDETERMINED" in r.stdout, True)
+    ok("it names the budget that was exceeded", "within 3s" in r.stderr, True)
+    ok("it says how to time your own startup", "time bash -ic true" in r.stderr, True)
+    ok("it names the override", "MOVIAN_SDK_PROBE_TIMEOUT" in r.stderr, True)
+    ok("and it still offers --fix-path", "--fix-path" in r.stderr, True)
+
+
 def main():
     # No SKIP path. The suite used to return success when /etc/skel was absent,
     # so on a minimal container or a non-Debian host it reported OK without
@@ -894,6 +952,9 @@ def main():
         case_diagnosis_without_a_prior_report_says_so,
         case_a_shim_run_from_the_checkout_finds_its_library,
         case_doctor_is_the_second_caller,
+        # from a real install on a fresh Debian stand
+        case_the_installing_shell_is_told_it_cannot_see_mdev,
+        case_undetermined_still_offers_the_remedy,
     ]
     for c in cases:
         with tempfile.TemporaryDirectory() as tmp:

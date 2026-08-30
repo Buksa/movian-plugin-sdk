@@ -168,7 +168,7 @@ movian_sdk_probe() {
   env -u BASH_ENV -u ENV \
       PATH="$(movian_sdk_path_without "$bindir")" \
       MOVIAN_SDK_EXPECT="$bindir/mdev" TERM=dumb \
-      "$timeout_bin" -s KILL "${MOVIAN_SDK_PROBE_TIMEOUT:-6}" \
+      "$timeout_bin" -s KILL "${MOVIAN_SDK_PROBE_TIMEOUT:-15}" \
       "$bash_bin" "$flag" '[ "$(command -v mdev)" = "$MOVIAN_SDK_EXPECT" ]' \
       </dev/null >/dev/null 2>&1 || rc=$?
 
@@ -227,9 +227,24 @@ movian_sdk_reachability_report() {
 movian_sdk_explain_unreachable() {
   local bindir="$1" root="${2:-}" verdict="$3"
   if [ "$verdict" = UNDETERMINED ]; then
+    local budget="${MOVIAN_SDK_PROBE_TIMEOUT:-15}"
     echo "warning: could not determine whether $(movian_sdk_shquote "$bindir") is reachable" >&2
-    echo "  a shell startup file did not finish within ${MOVIAN_SDK_PROBE_TIMEOUT:-6}s." >&2
-    echo "  this is not a verdict either way -- rerun, or check your ~/.bashrc." >&2
+    echo "  a shell startup file did not finish within ${budget}s, so the probe was" >&2
+    echo "  killed before it could answer. This is NOT a verdict either way." >&2
+    echo "  time your own startup:" >&2
+    echo "    time bash -ic true </dev/null" >&2
+    echo "  if that is genuinely slow (nvm, conda, completions), raise the budget:" >&2
+    echo "    MOVIAN_SDK_PROBE_TIMEOUT=60 mdev doctor" >&2
+    # Never leave the reader without the remedy just because the measurement
+    # failed. An UNDETERMINED interactive shape and a broken one look identical
+    # from the outside, and the fix is the same either way.
+    if [ -n "$root" ]; then
+      echo "  if mdev is missing from ordinary terminals, the fix is unchanged:" >&2
+      echo "    $(movian_sdk_shquote "$root")/install.sh --fix-path" >&2
+    else
+      echo "  if mdev is missing from ordinary terminals, the fix is unchanged:" >&2
+      echo "    rerun this repository's ./install.sh --fix-path" >&2
+    fi
     return 0
   fi
   local login="${MOVIAN_SDK_REACH_LOGIN:-}" inter="${MOVIAN_SDK_REACH_INTERACTIVE:-}"

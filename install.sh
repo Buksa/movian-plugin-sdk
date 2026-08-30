@@ -176,5 +176,26 @@ fi
 # a command, not a gate (movian-plugin-sdk#3).
 
 echo
-echo "Verify from any plugin repo (not from the core):"
-echo "    mdev doctor"
+# THIS shell cannot see what was just installed unless the bindir was already on
+# its PATH before the script started -- PATH is inherited at exec time, and no
+# amount of installing changes a running process's environment. Saying so is the
+# difference between "it works, open a new terminal" and a user typing `mdev`,
+# getting `command not found`, and concluding the install failed. Printed on
+# every run, not only on a bad verdict: it is true regardless of the verdict, and
+# an UNDETERMINED probe is exactly when the reader is left guessing.
+case ":$PATH:" in
+  *":$bindir:"*)
+    echo "Verify from any plugin repo (not from the core):"
+    echo "    mdev doctor"
+    ;;
+  *)
+    echo "This shell will NOT see mdev: its PATH was fixed when it started, before"
+    echo "$bindir was installed. That is expected and is not a failed install."
+    echo
+    echo "Open a new terminal, or reload this one:"
+    echo "    exec \"\$SHELL\" -l"
+    echo
+    echo "Then verify from any plugin repo (not from the core):"
+    echo "    mdev doctor"
+    ;;
+esac
