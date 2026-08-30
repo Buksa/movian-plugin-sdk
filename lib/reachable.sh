@@ -51,20 +51,61 @@ MOVIAN_SDK_GUARD_ANCHOR="# If not running interactively, don't do anything"
 # exist only as a local in install.sh, so any ${MOVIAN_SDK_BINDIR:-...} fallback
 # was a convention that failed silently on a custom bindir -- that variable
 # lives in the installer's shell and is never exported into an agent's.
+# One spelling for one directory. Without this a trailing slash produced a
+# CONFIDENTLY WRONG answer on a working install: `~/.local/bin` probed
+# REACHABLE while `~/.local/bin/` probed UNREACHABLE, because the scrub and the
+# `$bindir/mdev` comparison are both textual. `mdev doctor` reported a permanent
+# MISMATCH for the same reason.
+#
+# Relative paths are REFUSED rather than normalised against the caller's cwd.
+# `--fix-path` writes this string into ~/.bashrc, and a relative entry there
+# lands at the FRONT of PATH in every shell, resolving against whatever
+# directory the user happens to be in -- so `./mybin/git` in any checked-out
+# repository would run instead of git. install.sh already demands an absolute
+# path for the core; the bindir is the more dangerous of the two and demanded
+# none.
+movian_sdk_normalise_bindir() {
+  local dir="$1"
+  case "$dir" in
+    "") echo "error: empty bindir" >&2; return 1 ;;
+    /*) ;;
+    *)  echo "error: bindir must be an absolute path, got $(movian_sdk_shquote "$dir")" >&2
+        echo "  a relative directory written into ~/.bashrc lands at the front of PATH" >&2
+        echo "  in every shell and resolves against the current directory." >&2
+        return 1 ;;
+  esac
+  # Collapse repeated slashes and drop every trailing one, but never reduce the
+  # root itself to the empty string.
+  while :; do
+    case "$dir" in
+      *//*) dir="${dir//\/\//\/}" ;;
+      *)    break ;;
+    esac
+  done
+  while [ "${dir%/}" != "$dir" ] && [ "$dir" != "/" ]; do dir="${dir%/}"; done
+  printf '%s\n' "$dir"
+}
+
+
+# Where the shims were installed. Recorded rather than guessed: bindir used to
+# exist only as a local in install.sh, so any ${MOVIAN_SDK_BINDIR:-...} fallback
+# was a convention that failed silently on a custom bindir -- that variable
+# lives in the installer's shell and is never exported into an agent's.
+#
+# The recorded value wins over the environment. MOVIAN_SDK_BINDIR is the
+# installer's own override and is never exported into an agent session, so
+# preferring it blinded `mdev doctor` in both directions: a stale `bin` key that
+# breaks every agent reported clean, and a developer with the variable set got a
+# spurious MISMATCH. The config is what agents actually read, so the config is
+# what gets checked.
 movian_sdk_bindir() {
-  if [ -n "${MOVIAN_SDK_BINDIR:-}" ]; then
-    printf '%s\n' "$MOVIAN_SDK_BINDIR"
-    return 0
-  fi
+  local bin=""
   if [ -f "$MOVIAN_SDK_CONFIG" ]; then
-    local bin
-    bin="$(jq -r '.bin // empty' "$MOVIAN_SDK_CONFIG" 2>/dev/null)"
-    if [ -n "$bin" ]; then
-      printf '%s\n' "$bin"
-      return 0
-    fi
+    bin="$(jq -r '.bin // empty' "$MOVIAN_SDK_CONFIG" 2>/dev/null)" || bin=""
   fi
-  return 1
+  [ -n "$bin" ] || bin="${MOVIAN_SDK_BINDIR:-}"
+  [ -n "$bin" ] || return 1
+  movian_sdk_normalise_bindir "$bin" 2>/dev/null || printf '%s\n' "$bin"
 }
 
 
@@ -73,10 +114,17 @@ movian_sdk_bindir() {
 movian_sdk_path_without() {
   local drop="$1" out="" p
   local IFS=:
+  # `set -f` for the loop only: an unquoted expansion of $PATH is subject to
+  # pathname expansion, so a PATH entry containing `*` or `?` would be replaced
+  # by matching filenames -- silently rewriting the PATH the probe then runs
+  # under. IFS splitting is what this loop wants; globbing is not.
+  local reglob=0
+  case "$-" in *f*) ;; *) reglob=1; set -f ;; esac
   for p in $PATH; do
     [ "$p" = "$drop" ] && continue
     out="${out:+$out:}$p"
   done
+  [ "$reglob" -eq 0 ] || set +f
   printf '%s\n' "$out"
 }
 
@@ -93,18 +141,37 @@ movian_sdk_probe() {
     *) printf 'UNDETERMINED\n'; return 0 ;;
   esac
 
+  # Resolve the tools BEFORE scrubbing. `env` finds `timeout` and `timeout`
+  # finds `bash` along the probe's own PATH, so when the bindir is the only
+  # entry the scrub leaves nothing to run and the shell never starts -- which
+  # was then printed as UNREACHABLE, a confident answer about a measurement that
+  # never happened. Absolute paths take the search out of the probe entirely.
+  local bash_bin timeout_bin
+  bash_bin="$(command -v bash 2>/dev/null)" || bash_bin=""
+  timeout_bin="$(command -v timeout 2>/dev/null)" || timeout_bin=""
+  if [ -z "$bash_bin" ] || [ -z "$timeout_bin" ]; then
+    # No GNU timeout (BSD, busybox) or no bash: this host cannot be measured
+    # the way the contract requires. That is undetermined, not unreachable.
+    printf 'UNDETERMINED\n'
+    return 0
+  fi
+
   # The comparison, not merely `command -v`: another mdev earlier on PATH would
   # otherwise be reported as this installation being reachable.
   env -u BASH_ENV -u ENV \
       PATH="$(movian_sdk_path_without "$bindir")" \
       MOVIAN_SDK_EXPECT="$bindir/mdev" TERM=dumb \
-      timeout -s KILL "${MOVIAN_SDK_PROBE_TIMEOUT:-6}" \
-      bash "$flag" '[ "$(command -v mdev)" = "$MOVIAN_SDK_EXPECT" ]' \
+      "$timeout_bin" -s KILL "${MOVIAN_SDK_PROBE_TIMEOUT:-6}" \
+      "$bash_bin" "$flag" '[ "$(command -v mdev)" = "$MOVIAN_SDK_EXPECT" ]' \
       </dev/null >/dev/null 2>&1 || rc=$?
 
   case "$rc" in
     0)        printf 'REACHABLE\n' ;;
+    # 124 = timeout fired, 137 = SIGKILL landed: measured, and it hung.
     124|137)  printf 'UNDETERMINED\n' ;;
+    # 125 timeout itself failed, 126 found but not executable, 127 not found.
+    # None of these are a verdict about the bindir -- the probe never ran.
+    125|126|127) printf 'UNDETERMINED\n' ;;
     *)        printf 'UNREACHABLE\n' ;;
   esac
   return 0
@@ -160,6 +227,26 @@ movian_sdk_explain_unreachable() {
   fi
   local login="${MOVIAN_SDK_REACH_LOGIN:-}" inter="${MOVIAN_SDK_REACH_INTERACTIVE:-}"
   echo "warning: $(movian_sdk_shquote "$bindir") is not reachable from every shell that will run mdev" >&2
+
+  # An UNDETERMINED shape was never measured, so nothing may be asserted about
+  # it. Saying "a login shell finds it" when the login probe was killed states
+  # a fact that was not established -- the same class of confident wrong answer
+  # this whole check exists to remove.
+  if [ "$login" = UNDETERMINED ] || [ "$inter" = UNDETERMINED ]; then
+    [ "$login" = UNDETERMINED ] &&
+      echo "  the LOGIN shape could not be measured; no claim is made about it." >&2
+    [ "$inter" = UNDETERMINED ] &&
+      echo "  the ORDINARY TERMINAL shape could not be measured; no claim is made about it." >&2
+    if [ "$login" = UNREACHABLE ] || [ "$inter" = UNREACHABLE ]; then
+      echo "  of the shapes that WERE measured, at least one cannot find it." >&2
+    fi
+    if [ -n "$root" ]; then
+      echo "  fix: $(movian_sdk_shquote "$root")/install.sh --fix-path" >&2
+    else
+      echo "  fix: rerun this repository's ./install.sh --fix-path" >&2
+    fi
+    return 0
+  fi
 
   # Name the shape that actually failed. Claiming "login works, terminals do
   # not" unconditionally is false whenever a custom bindir is in neither startup
@@ -271,22 +358,36 @@ movian_sdk_fix_path() {
 
   stripped="$(movian_sdk_block_strip "$rc_file")"
 
-  # Back up before the first modification. This is a file the user owns, and the
-  # SDK's own discipline for files it merely installs is already "never clobber
-  # silently" (install.sh install_file).
+  # Nothing to do is not a modification. Creating a backup here let a no-op
+  # `--unfix-path` claim the single backup slot, so every LATER real edit
+  # announced a backup that predated nothing.
+  if [ "$mode" = remove ] && ! grep -qxF "$MOVIAN_SDK_BLOCK_BEGIN" "$rc_file"; then
+    echo "  no Movian SDK block in $rc_file -- nothing to remove"
+    return 0
+  fi
+
+  # Back up before EVERY modification, not once ever. A single fixed name meant
+  # the second run onwards was unprotected while still printing a backup path --
+  # the reassurance outlived the thing it described. This is a file the user
+  # owns; the SDK's discipline for files it merely installs is already "never
+  # clobber silently" (install.sh install_file), which backs up per write.
   #
   # Deliberately NOT an atomic rename: ~/.bashrc is very often a symlink into a
   # dotfiles repository, and `mv` over it replaces the symlink with a regular
   # file -- verified. Redirection writes THROUGH the symlink and keeps such a
   # setup working, and the backup covers what atomicity was meant to protect.
-  backup="$rc_file.movian-sdk.bak"
-  [ -e "$backup" ] || cp -p "$rc_file" "$backup"
+  # Timestamps are second-granular, and an apply immediately followed by a
+  # remove lands inside one second -- the second copy would overwrite the first
+  # and the pre-apply original would be gone. Uniquify rather than clobber.
+  backup="$rc_file.movian-sdk.bak-$(date +%Y%m%d%H%M%S)"
+  if [ -e "$backup" ]; then
+    local seq=2
+    while [ -e "$backup.$seq" ]; do seq=$((seq + 1)); done
+    backup="$backup.$seq"
+  fi
+  cp -p "$rc_file" "$backup"
 
   if [ "$mode" = remove ]; then
-    if ! grep -qxF "$MOVIAN_SDK_BLOCK_BEGIN" "$rc_file"; then
-      echo "  no Movian SDK block in $rc_file -- nothing to remove"
-      return 0
-    fi
     printf '%s\n' "$stripped" > "$rc_file"
     echo "  removed the Movian SDK block from $rc_file (backup: $backup)"
     return 0
@@ -295,7 +396,13 @@ movian_sdk_fix_path() {
   # Refuse rather than guess. Appending at EOF would satisfy the interactive
   # shape and silently leave `ssh host 'mdev ...'` broken -- a partial fix
   # reported as a complete one, which is the defect class #34 was filed about.
-  if ! printf '%s\n' "$stripped" | grep -qxF "$MOVIAN_SDK_GUARD_ANCHOR"; then
+  # A here-string, not a pipe. `grep -q` exits at the first match and closes the
+  # pipe, so `printf` takes SIGPIPE; under `set -o pipefail` -- which install.sh
+  # sets -- that made the whole pipeline fail and the anchor look MISSING. It
+  # only showed up once the file was large enough for printf to still be writing
+  # when grep left: an 89KiB ~/.bashrc refused the fix and aborted the install,
+  # while a stock 3.5KiB one was fine.
+  if ! grep -qxF "$MOVIAN_SDK_GUARD_ANCHOR" <<<"$stripped"; then
     echo "error: no interactive guard found in $(movian_sdk_shquote "$rc_file")" >&2
     echo "  expected the line: $MOVIAN_SDK_GUARD_ANCHOR" >&2
     echo "  this file is not shaped like Debian's /etc/skel/.bashrc, and inserting" >&2
@@ -312,13 +419,16 @@ movian_sdk_fix_path() {
   # written back as live code and executed on every interactive shell start.
   # head/tail never reinterprets what it copies.
   local n
-  n="$(printf '%s\n' "$stripped" | grep -nxF -m1 "$MOVIAN_SDK_GUARD_ANCHOR" | cut -d: -f1)"
+  # Same SIGPIPE hazard as the anchor test above: `grep -m1` and `head` both
+  # stop early and would break the pipe under pipefail. Here-strings have no
+  # writer to signal.
+  n="$(grep -nxF -m1 "$MOVIAN_SDK_GUARD_ANCHOR" <<<"$stripped" | cut -d: -f1)"
   {
-    printf '%s\n' "$stripped" | head -n "$((n - 1))"
+    head -n "$((n - 1))" <<<"$stripped"
     # The trailing blank line is emitted by block_text's heredoc; block_strip
     # eats exactly one blank after END, which keeps removal an exact inverse.
     movian_sdk_block_text "$bindir"
-    printf '%s\n' "$stripped" | tail -n "+$n"
+    tail -n "+$n" <<<"$stripped"
   } > "$tmp"
   cat "$tmp" > "$rc_file"
   rm -f "$tmp"

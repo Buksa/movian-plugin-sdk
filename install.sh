@@ -40,6 +40,18 @@ for arg in "$@"; do
   esac
 done
 
+# The bindir is validated as strictly as the core path (below), and for a
+# sharper reason: `--fix-path` writes this string into ~/.bashrc, where a
+# relative entry lands at the FRONT of PATH in every shell and resolves against
+# whatever directory the user is in. A `./mybin/git` in any checked-out
+# repository would then run instead of git. Normalising also collapses a
+# trailing slash, which the textual PATH scrub and the `$bindir/mdev`
+# comparison would otherwise treat as a different directory -- reporting a
+# working install as UNREACHABLE.
+. "$here/lib/locate.sh"
+. "$here/lib/reachable.sh"
+bindir="$(movian_sdk_normalise_bindir "$bindir")" || exit 1
+
 mkdir -p "$bindir" "$libdir" "$(dirname "$config")"
 
 # Never clobber silently: an existing file that differs is backed up first.
@@ -117,13 +129,18 @@ if [ -f "$config" ]; then
   # is not the last command of the AND-list, so `set -e` does not fire -- and
   # the script would then print that the bindir was recorded when the config
   # was untouched, leaving the skills' fallback with no "bin" key to read.
-  if jq --arg bin "$bindir" '. + {bin: $bin}' "$config" > "$tmpcfg" 2>/dev/null; then
-    cat "$tmpcfg" > "$config"
+  # The write is guarded too, not just the jq. jq SUCCEEDS on a read-only
+  # config -- it writes to $tmpcfg -- so the failure landed on the unguarded
+  # `cat > "$config"`, and `set -e` aborted the script from INSIDE the branch
+  # meant to report honestly: no WARNING, no reachability report, and $tmpcfg
+  # left behind.
+  if jq --arg bin "$bindir" '. + {bin: $bin}' "$config" > "$tmpcfg" 2>/dev/null &&
+     cat "$tmpcfg" > "$config" 2>/dev/null; then
     echo "  recorded bin -> $bindir in $config"
   else
     echo "  WARNING: could not record bin in $config" >&2
-    echo "  it is not valid JSON, or jq is unavailable. The skills resolve mdev" >&2
-    echo "  through this key, so fix the file and rerun:" >&2
+    echo "  it is not valid JSON, jq is unavailable, or the file is not writable." >&2
+    echo "  The skills resolve mdev through this key, so fix the file and rerun:" >&2
     echo "    {\"core\": \"/abs/path/to/movian\", \"bin\": \"$bindir\"}" >&2
   fi
   rm -f "$tmpcfg"
@@ -134,7 +151,8 @@ fi
 # shell, which is wrong in both directions at once (movian-plugin-sdk#34): it
 # warned from a shell that happened to carry the directory, and stayed silent
 # from a login shell while every ordinary terminal failed.
-. "$here/lib/reachable.sh"
+# (Both libraries are already sourced above, to validate the bindir before it
+# reaches a directory, a config, or a startup file.)
 
 if [ -n "$fixmode" ]; then
   echo

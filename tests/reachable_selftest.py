@@ -19,12 +19,15 @@ confident wrong answer rather than an error -- and each has its own case here:
 Needs no Movian core and no SDK configuration. It needs git, bash, jq, awk and
 Python, and writes synthetic homes under TMPDIR.
 """
+import os
 import pathlib
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 LIB = HERE.parent / "lib" / "reachable.sh"
@@ -45,8 +48,12 @@ def ok(label, got, want):
         FAILURES.append(f"{label}: got {got!r}, expected {want!r}")
 
 
-def sh(script, home, extra_env=None, timeout=60):
-    """Run a bash snippet with lib/reachable.sh sourced, against a fixture HOME."""
+def sh(script, home, extra_env=None, timeout=60, lib=None, open_stdin=False):
+    """Run a bash snippet with lib/reachable.sh sourced, against a fixture HOME.
+
+    `lib` selects a mutated copy instead of the real library, so a case can
+    prove that a property is load-bearing by removing it.
+    """
     env = {
         "HOME": str(home),
         "PATH": "/usr/bin:/bin",
@@ -54,10 +61,75 @@ def sh(script, home, extra_env=None, timeout=60):
         "MOVIAN_SDK_CONFIG": f"{home}/.config/movian-sdk/config.json",
     }
     env.update(extra_env or {})
-    return subprocess.run(
-        ["/bin/bash", "-c", f'set -euo pipefail\n. "{LIB}"\n{script}'],
-        env=env, stdin=subprocess.DEVNULL, timeout=timeout,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # An OPEN pipe with no writer, not DEVNULL, when a case is proving that the
+    # probe's own `</dev/null` matters: with DEVNULL here the child inherits it
+    # and the mutant cannot hang, which silently masks the very property under
+    # test.
+    rfd = wfd = None
+    if open_stdin:
+        rfd, wfd = os.pipe()
+        stdin = rfd
+    else:
+        stdin = subprocess.DEVNULL
+    try:
+        return subprocess.run(
+            ["/bin/bash", "-c", f'set -euo pipefail\n. "{lib or LIB}"\n{script}'],
+            env=env, stdin=stdin, timeout=timeout,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    finally:
+        for fd in (rfd, wfd):
+            if fd is not None:
+                os.close(fd)
+
+
+def mutate_lib(tmp, find, replace):
+    """A copy of lib/reachable.sh with one property removed.
+
+    Mutation testing is the only way to show a guard guards anything: a case
+    that stays green when the code it names is deleted is not testing that code.
+    Three cases in this file used to do exactly that.
+    """
+    src = LIB.read_text()
+    if find not in src:
+        # A mutation target that has vanished means the property this case
+        # guards was removed or rewritten. That is a finding, not a crash.
+        FAILURES.append(f"mutation target absent from lib/reachable.sh: {find!r}")
+        print(f"  FAIL mutation target absent: {find!r}")
+        return LIB
+    dst = pathlib.Path(tmp) / f"mutant-{abs(hash(find)) % 10**8}.sh"
+    dst.write_text(src.replace(find, replace, 1))
+    return dst
+
+
+def wedge_marker(home):
+    """A uniquely-named wedge command, so survivors are identifiable in `ps`.
+
+    A bare `sleep 300` in the fixture's ~/.bashrc is indistinguishable from any
+    other sleep on the machine -- and HOME is an environment variable, so it
+    never appears in the process arguments. The wedge is therefore a script at a
+    path unique to this fixture, which `ps -o args` does show.
+    """
+    marker = home / ".local" / "bin" / "movian-sdk-wedge"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("#!/bin/sh\nexec sleep 300\n")
+    marker.chmod(0o755)
+    return marker
+
+
+def survivors_of(marker):
+    """Probe shells still wedged on `marker`.
+
+    `timeout` reports 124 whether or not the child died, so the exit status
+    cannot tell a killed shell from a surviving one. The process table can.
+    """
+    out = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True).stdout
+    return [int(ln.split()[0]) for ln in out.splitlines() if str(marker) in ln]
+
+
+def kill_survivors(marker):
+    for pid in survivors_of(marker):
+        try: os.kill(pid, signal.SIGKILL)
+        except Exception: pass
 
 
 def fixture(tmp, *, anchor=True, with_mdev=True):
@@ -183,35 +255,86 @@ def case_unscrubbed_path_would_lie(tmp):
 
 
 def case_a_reading_bashrc_is_undetermined(tmp):
-    print("TRAP: a ~/.bashrc that reads input is UNDETERMINED, not a hang")
+    """The stdin redirect, proved load-bearing by removing it.
+
+    The previous version asserted nothing that could fail: it accepted
+    UNDETERMINED as a pass, and UNDETERMINED is exactly what a missing
+    `</dev/null` produces. Deleting the redirect from lib/reachable.sh left the
+    whole suite green, so the property is now tested by taking it away.
+
+    On `timeout -s KILL`: measured here, SIGTERM and SIGKILL give the SAME
+    verdict, the same elapsed time and the same orphaned grandchild, so no case
+    in this file can distinguish them. `-s KILL` is kept as defence against a
+    bash that ignores SIGTERM, and this comment records that as a belief rather
+    than a measurement -- the honest alternative to a green tick proving nothing.
+    """
+    print("the stdin redirect is load-bearing, proved by removing it")
     home, bindir = fixture(tmp)
-    with open(home / ".bashrc", "a") as f:
-        f.write('\nread -r -p "press enter: " _x\n')
-    # stdin is /dev/null inside the probe, so `read` gets EOF rather than
-    # blocking. Without that redirect this call does not return at all.
-    r = sh(f'movian_sdk_probe "{bindir}" interactive', home, timeout=30)
-    ok("answers instead of hanging", r.stdout.strip() in ("UNREACHABLE", "UNDETERMINED"), True)
 
-    # And the timeout itself must kill: interactive bash does not reliably die
-    # on SIGTERM, so `timeout` without -s KILL can return while the shell lives.
-    with open(home / ".bashrc", "w") as f:
-        f.write("sleep 300\n")
+    # With the redirect, `read` gets EOF at once and the probe returns a real
+    # verdict.
+    (home / ".bashrc").write_text('read -r -p "press enter: " _x\n')
+    verdict = sh(f'movian_sdk_probe "{bindir}" interactive', home, timeout=30).stdout.strip()
+    ok("with the redirect, a real verdict", verdict in ("REACHABLE", "UNREACHABLE"), True)
+
+    # Without it the shell blocks on a terminal that never types, and only the
+    # probe's own timeout ends it -- the answer degrades from a measurement to
+    # "could not determine".
+    mutant = mutate_lib(tmp, "</dev/null ", "")
+    mutated = sh(f'movian_sdk_probe "{bindir}" interactive', home, lib=mutant,
+                 extra_env={"MOVIAN_SDK_PROBE_TIMEOUT": "3"}, timeout=40,
+                 open_stdin=True).stdout.strip()
+    ok("without it, no verdict is obtainable", mutated, "UNDETERMINED")
+    ok("the redirect decides whether the probe can answer at all",
+       verdict != mutated, True)
+
+    # A genuinely wedged startup file is UNDETERMINED rather than a confident
+    # UNREACHABLE, and the probe RETURNS rather than hanging.
+    marker = wedge_marker(home)
+    (home / ".bashrc").write_text(f"{marker}\n")
+    started = time.monotonic()
     r = sh(f'movian_sdk_probe "{bindir}" interactive', home,
-           extra_env={"MOVIAN_SDK_PROBE_TIMEOUT": "3"}, timeout=30)
+           extra_env={"MOVIAN_SDK_PROBE_TIMEOUT": "3"}, timeout=40)
+    elapsed = time.monotonic() - started
     ok("a wedged startup file is UNDETERMINED", r.stdout.strip(), "UNDETERMINED")
+    ok("and the probe returns, bounded by its own timeout", elapsed < 20, True)
+    # timeout kills the shell it started, not the grandchild that shell left
+    # behind. One orphan survives; recorded here so a later reader knows it was
+    # measured rather than missed.
+    kill_survivors(marker)
 
 
-def case_home_is_not_isolation(tmp):
-    print("HOME is not isolation -- assert verdicts, never output text")
-    home, _ = fixture(tmp)
-    r = subprocess.run(["/bin/bash", "-ic", "true"],
-                       env={"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb"},
-                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.PIPE, text=True)
-    # The host's /etc/bash.bashrc is read regardless of HOME. It does not touch
-    # PATH on a stock Debian, so it is noise rather than corruption -- but that
-    # is a property of the host, not a guarantee. Hence: verdicts, not text.
-    ok("the host still speaks into the fixture", bool(r.stderr.strip()), True)
+def case_host_noise_does_not_reach_the_verdict(tmp):
+    """Host chatter is real; the point is that the VERDICT is immune to it.
+
+    The previous version asserted only that `bash -ic` printed something on
+    stderr -- bash's own job-control complaint, true under `--norc`, and it
+    called no SDK function at all. It could not fail for any reason connected to
+    this repository. What actually matters is that the probe reports on the
+    fixture and not on the developer's machine, so that is what is asserted.
+    """
+    print("host noise is loud, and the verdict ignores it")
+    home, bindir = fixture(tmp)
+
+    # Deliberately noisy startup file, on top of whatever the host's
+    # /etc/bash.bashrc already says.
+    (home / ".bashrc").write_text(
+        'echo "NOISE on stdout"\necho "NOISE on stderr" >&2\n')
+    ok("no dotfile provides it -> UNREACHABLE despite the noise",
+       sh(f'movian_sdk_probe "{bindir}" interactive', home).stdout.strip(),
+       "UNREACHABLE")
+
+    (home / ".bashrc").write_text(
+        f'echo "NOISE on stdout"\necho "NOISE on stderr" >&2\nPATH="{bindir}:$PATH"\n')
+    ok("the dotfile provides it -> REACHABLE despite the same noise",
+       sh(f'movian_sdk_probe "{bindir}" interactive', home).stdout.strip(),
+       "REACHABLE")
+
+    # And the verdict is the only thing on stdout: a caller parsing it must not
+    # have to strip the host's or the user's chatter.
+    r = sh(f'movian_sdk_probe "{bindir}" interactive', home)
+    ok("stdout carries the verdict and nothing else",
+       r.stdout.strip().splitlines(), ["REACHABLE"])
 
 
 def case_installer_records_bin(tmp):
@@ -344,8 +467,14 @@ def case_the_diagnosis_names_the_shape_that_failed(tmp):
     ok("login is the failing shape", "reachable: login          UNREACHABLE" in r.stdout, True)
     ok("and the message says so, not the opposite",
        "a LOGIN shell does not" in r.stderr, True)
-    ok("it does not claim terminals are broken",
-       "an ordinary terminal answers" in r.stderr, False)
+    # Assert against a string the tree actually contains. The previous version
+    # grepped for "an ordinary terminal answers", which no longer exists
+    # anywhere after the diagnosis was rewritten -- so it compared False to
+    # False and stayed green under the exact regression it names.
+    ok("it does not claim the terminal shape is the broken one",
+       "an ordinary terminal does not" in r.stderr, False)
+    ok("the wrong-way-round sentence is a real string in lib/reachable.sh",
+       "an ordinary terminal does not" in LIB.read_text(), True)
 
 
 def case_a_backup_is_taken_before_the_first_edit(tmp):
@@ -356,9 +485,9 @@ def case_a_backup_is_taken_before_the_first_edit(tmp):
     (home / ".bashrc").symlink_to(real)          # as stow/chezmoi would leave it
     before = real.read_text()
     sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir}" apply', home)
-    ok("backup exists", (home / ".bashrc.movian-sdk.bak").is_file(), True)
-    ok("backup holds the original",
-       (home / ".bashrc.movian-sdk.bak").read_text() == before, True)
+    baks = sorted(home.glob(".bashrc.movian-sdk.bak-*"))
+    ok("a backup was taken", len(baks), 1)
+    ok("backup holds the original", baks[0].read_text() == before, True)
     # An atomic rename would replace the symlink with a regular file, breaking a
     # dotfiles repository. Redirection writes through it.
     ok("still a symlink", (home / ".bashrc").is_symlink(), True)
@@ -384,6 +513,196 @@ def case_installer_reports_a_failed_merge(tmp):
     ok("the broken config is left alone", cfg.read_text(), "this is not json\n")
 
 
+# --- cases added from the Orca orchestration review (run_255978bddcf3) --------
+
+def case_a_probe_that_never_launched_is_undetermined(tmp):
+    """Exit 125/126/127 mean the probe never ran -- that is not a verdict.
+
+    `env` resolves `timeout` and `timeout` resolves `bash` along the SCRUBBED
+    PATH, so when the bindir is the only entry there is nothing left to run.
+    That used to fall into the catch-all arm and print UNREACHABLE: a confident
+    statement about a measurement that never happened, which is the exact defect
+    class this file exists to prevent.
+    """
+    print("a probe that never launched is UNDETERMINED, not UNREACHABLE")
+    home, bindir = fixture(tmp)
+    (home / ".bashrc").write_text(f'PATH="{bindir}:$PATH"\n')
+
+    # No usable PATH for the probe's own tools once the bindir is scrubbed out.
+    ok("cannot launch -> UNDETERMINED",
+       sh(f'movian_sdk_probe "{bindir}" interactive', home,
+          extra_env={"PATH": str(bindir)}).stdout.strip(),
+       "UNDETERMINED")
+
+    # Two guards cover this between them -- an early return when the probe's own
+    # tools are unreachable, and the 125/126/127 arm for a launch that fails
+    # some other way. Either alone still yields UNDETERMINED, so the mutant has
+    # to remove both to show what the pair is preventing.
+    mutant = mutate_lib(tmp, "    125|126|127) printf 'UNDETERMINED\\n' ;;", "")
+    mutant2 = pathlib.Path(tmp) / "mutant-nolaunch-guard.sh"
+    mutant2.write_text(mutant.read_text().replace(
+        "    printf 'UNDETERMINED\\n'\n    return 0\n  fi", "    :\n  fi", 1))
+    ok("with neither guard it degrades to a false UNREACHABLE",
+       sh(f'movian_sdk_probe "{bindir}" interactive', home, lib=mutant2,
+          extra_env={"PATH": str(bindir)}).stdout.strip(),
+       "UNREACHABLE")
+
+
+def case_bindir_must_be_absolute(tmp):
+    """A relative bindir in ~/.bashrc is a PATH hijack, so it is refused.
+
+    `--fix-path` writes the bindir into ~/.bashrc, where a relative entry lands
+    at the FRONT of PATH in every shell and resolves against whatever directory
+    the user is in -- so `./mybin/git` in any checked-out repository would run
+    instead of git. install.sh demanded an absolute path for the core and none
+    for the bindir, which is the more dangerous of the two.
+    """
+    print("a relative bindir is refused before it reaches any file")
+    home, _ = fixture(tmp)
+    r = sh('movian_sdk_normalise_bindir "mybin" || echo REFUSED', home)
+    ok("refused", "REFUSED" in r.stdout, True)
+    ok("and says why", "absolute path" in r.stderr, True)
+
+    # install.sh must refuse too, before it creates directories or edits files.
+    workdir = pathlib.Path(tmp) / "cwd"; workdir.mkdir()
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb",
+           "MOVIAN_SDK_BINDIR": "mybin",
+           "MOVIAN_SDK_LIBDIR": str(home / ".local/lib/movian-sdk"),
+           "MOVIAN_SDK_CONFIG": str(home / ".config/movian-sdk/config.json")}
+    before = (home / ".bashrc").read_text()
+    r = subprocess.run(["/bin/bash", str(INSTALLER), "--fix-path"], env=env, cwd=workdir,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, text=True, timeout=120)
+    ok("install.sh exits non-zero", r.returncode != 0, True)
+    ok("and wrote nothing to ~/.bashrc", (home / ".bashrc").read_text() == before, True)
+    ok("and created no relative bindir", (workdir / "mybin").exists(), False)
+
+
+def case_bindir_spelling_does_not_change_the_verdict(tmp):
+    """One directory, one answer, however it is spelled.
+
+    The scrub and the `$bindir/mdev` comparison are both textual, so a trailing
+    slash used to make a WORKING install report UNREACHABLE -- and `mdev doctor`
+    report a permanent MISMATCH for the same reason.
+    """
+    print("a trailing slash is the same directory, and gets the same verdict")
+    home, bindir = fixture(tmp)
+    sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir}" apply', home)
+    verdicts = set()
+    for spelling in (f"{bindir}", f"{bindir}/", f"{bindir}//", str(bindir).replace("/.local", "//.local")):
+        r = sh(f'movian_sdk_probe "$(movian_sdk_normalise_bindir "{spelling}")" interactive', home)
+        verdicts.add(r.stdout.strip())
+    ok("every spelling agrees", sorted(verdicts), ["REACHABLE"])
+
+
+def case_unwritable_config_does_not_abort_the_installer(tmp):
+    """jq succeeds on a read-only config -- it writes to the temp file.
+
+    The failure therefore landed on the unguarded `cat > "$config"`, and `set -e`
+    aborted the script from INSIDE the branch meant to report honestly: no
+    WARNING, no reachability report, and the temp file left behind.
+    """
+    print("a read-only config warns, and the installer still finishes")
+    home, bindir = fixture(tmp, with_mdev=False)
+    cfg = home / ".config" / "movian-sdk" / "config.json"
+    cfg.write_text('{"core": "/some/core"}\n')
+    cfg.chmod(0o444)
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb",
+           "MOVIAN_SDK_BINDIR": str(bindir),
+           "MOVIAN_SDK_LIBDIR": str(home / ".local/lib/movian-sdk"),
+           "MOVIAN_SDK_CONFIG": str(cfg)}
+    r = subprocess.run(["/bin/bash", str(INSTALLER)], env=env, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                       timeout=120)
+    cfg.chmod(0o644)
+    ok("it warns", "could not record bin" in r.stdout, True)
+    ok("it does not claim success", "recorded bin ->" in r.stdout, False)
+    ok("it still reports reachability", "reachable: login" in r.stdout, True)
+    ok("and does not gate", r.returncode, 0)
+
+
+def case_diagnosis_claims_nothing_about_an_unmeasured_shape(tmp):
+    """An UNDETERMINED shape was never measured, so nothing may be said of it."""
+    print("the diagnosis makes no claim about a shape it could not measure")
+    home, bindir = fixture(tmp)
+    r = sh(f'MOVIAN_SDK_REACH_LOGIN=UNDETERMINED\n'
+           f'MOVIAN_SDK_REACH_INTERACTIVE=UNREACHABLE\n'
+           f'movian_sdk_explain_unreachable "{bindir}" "" UNREACHABLE', home)
+    ok("it says the login shape was not measured",
+       "LOGIN shape could not be measured" in r.stderr, True)
+    ok("and does not assert login works",
+       "a login shell finds it" in r.stderr, False)
+
+
+def case_every_edit_is_backed_up(tmp):
+    """A single fixed backup name protected only the first edit."""
+    print("each modification takes its own backup, and a no-op takes none")
+    home, bindir = fixture(tmp)
+    sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir}" remove', home)
+    ok("a no-op remove takes no backup", len(list(home.glob(".bashrc.movian-sdk.bak-*"))), 0)
+    sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir}" apply', home)
+    sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir}" remove', home)
+    ok("two real edits, two backups", len(list(home.glob(".bashrc.movian-sdk.bak-*"))), 2)
+
+    # Both halves are load-bearing: a fixed name, or a timestamp without the
+    # uniquifier, silently collapses an apply+remove pair inside one second back
+    # onto a single file -- and the pre-apply original is the one that is lost.
+    mutant = mutate_lib(tmp, 'backup="$rc_file.movian-sdk.bak-$(date +%Y%m%d%H%M%S)"',
+                        'backup="$rc_file.movian-sdk.bak-fixed"')
+    collapsed = pathlib.Path(tmp) / "mutant-nouniq.sh"
+    collapsed.write_text(mutant.read_text().replace(
+        '  if [ -e "$backup" ]; then', "  if false; then", 1))
+    second = pathlib.Path(tmp) / "second"; second.mkdir(exist_ok=True)
+    home2, bindir2 = fixture(str(second))
+    sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir2}" apply', home2, lib=collapsed)
+    sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir2}" remove', home2, lib=collapsed)
+    ok("without both, the two edits share one backup",
+       len(list(home2.glob(".bashrc.movian-sdk.bak*"))), 1)
+
+
+def case_a_large_bashrc_still_gets_fixed(tmp):
+    """`grep -q` closes the pipe and `printf` takes SIGPIPE; pipefail then lies.
+
+    It only showed on a file big enough that printf was still writing when grep
+    left: an 89KiB ~/.bashrc refused the fix as "no interactive guard" and
+    aborted the install, while a stock 3.5KiB one was fine.
+    """
+    print("a large ~/.bashrc does not fake a missing guard")
+    home, bindir = fixture(tmp)
+    # Past the 64KiB pipe buffer on purpose: below it `printf` finishes writing
+    # before `grep -q` exits, no SIGPIPE is raised, and the bug hides.
+    big = (home / ".bashrc").read_text() + ("# padding to exceed the pipe buffer\n" * 3000)
+    assert len(big) > 64 * 1024, "fixture must exceed the pipe buffer to exercise SIGPIPE"
+    (home / ".bashrc").write_text(big)
+    r = sh(f'movian_sdk_fix_path "$HOME/.bashrc" "{bindir}" apply', home)
+    ok("the fix applies", (home / ".bashrc").read_text().count(BEGIN), 1)
+    ok("and does not claim the guard is missing", "no interactive guard" in r.stderr, False)
+
+
+def case_path_scrub_does_not_glob(tmp):
+    """An unquoted $PATH expansion is subject to pathname expansion."""
+    print("a PATH entry containing a glob is not expanded away")
+    home, _ = fixture(tmp)
+    r = sh('PATH="/usr/bin:/tmp/*:/bin"; movian_sdk_path_without /bin', home)
+    ok("the glob survives verbatim", r.stdout.strip(), "/usr/bin:/tmp/*")
+
+
+def case_the_seven_preambles_are_identical(tmp):
+    """Nothing bound the seven copies together, so they could drift apart."""
+    print("all seven skill preambles are byte-identical")
+    skills = HERE.parent / "plugins" / "movian" / "skills"
+    blocks = {}
+    for skill in sorted(p for p in skills.iterdir() if (p / "SKILL.md").is_file()):
+        text = (skill / "SKILL.md").read_text()
+        start = text.find("> **Resolving `mdev` first.**")
+        if start < 0:
+            continue
+        end = text.find("\n\n", text.find("stay identical", start))
+        blocks[skill.name] = text[start:end]
+    ok("every skill carries one", len(blocks), 7)
+    ok("and they are all the same", len(set(blocks.values())), 1)
+
+
 def main():
     if not SKEL.joinpath(".bashrc").is_file():
         print(f"reachable_selftest: SKIP -- {SKEL}/.bashrc is absent, so there is no")
@@ -400,7 +719,7 @@ def main():
         case_missing_anchor_refuses,
         case_unscrubbed_path_would_lie,
         case_a_reading_bashrc_is_undetermined,
-        case_home_is_not_isolation,
+        case_host_noise_does_not_reach_the_verdict,
         case_installer_records_bin,
         case_installer_warns_where_it_used_to_be_silent,
         case_printed_fix_actually_works,
@@ -411,6 +730,16 @@ def main():
         case_the_diagnosis_names_the_shape_that_failed,
         case_a_backup_is_taken_before_the_first_edit,
         case_installer_reports_a_failed_merge,
+        # from the Orca orchestration review
+        case_a_probe_that_never_launched_is_undetermined,
+        case_bindir_must_be_absolute,
+        case_bindir_spelling_does_not_change_the_verdict,
+        case_unwritable_config_does_not_abort_the_installer,
+        case_diagnosis_claims_nothing_about_an_unmeasured_shape,
+        case_every_edit_is_backed_up,
+        case_a_large_bashrc_still_gets_fixed,
+        case_path_scrub_does_not_glob,
+        case_the_seven_preambles_are_identical,
     ]
     for c in cases:
         with tempfile.TemporaryDirectory() as tmp:

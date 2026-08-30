@@ -153,15 +153,23 @@ if [ "${1:-}" = "doctor" ]; then
   # after the user edits a dotfile, which the installer cannot.
   if [ -f "$MOVIAN_SDK_LIB/reachable.sh" ]; then
     . "$MOVIAN_SDK_LIB/reachable.sh"
-    self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    # `pwd -P` and the same normalisation the recorded value went through, so a
+    # symlinked bindir or a trailing slash is not reported as a MISMATCH when
+    # both names denote one directory.
+    self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
     if recorded="$(movian_sdk_bindir)"; then
+      recorded="$(movian_sdk_normalise_bindir "$recorded" 2>/dev/null || printf '%s' "$recorded")"
+      recorded_real="$(cd "$recorded" 2>/dev/null && pwd -P)" || recorded_real="$recorded"
       # The one honest check available for the agent's `bash -c`, whose
       # environment holds no state to inspect: does the bindir agents are
       # pointed at match the one this invocation actually came from?
-      if [ "$recorded" = "$self" ]; then
+      if [ "$recorded_real" = "$self" ]; then
         echo "bindir:    $recorded"
       else
         echo "bindir:    MISMATCH — recorded $recorded, but this mdev ran from $self"
+        echo "           agents resolve mdev through the recorded path, so they are not"
+        echo "           running what you just ran. Rerun install.sh from the checkout"
+        echo "           you want agents to use."
         rc=1
       fi
     else

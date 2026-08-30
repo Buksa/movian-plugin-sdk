@@ -11,27 +11,37 @@ description: >-
 # Authoring a Movian plugin
 
 > **Resolving `mdev` first.** Every `mdev` command below assumes the shim is
-> reachable. It often is not: an agent session runs a **non-interactive** shell,
-> which reads neither `~/.profile` nor `~/.bashrc`, so `mdev` is on `PATH` only
-> if whatever launched the session happened to put it there. Do not rely on that.
+> reachable. It often is not: an agent session runs a **non-login,
+> non-interactive** shell, which reads neither `~/.profile` nor `~/.bashrc`, so
+> `mdev` is on `PATH` only if whatever launched the session happened to put it
+> there. (A login shell — `bash -lc` — *is* non-interactive but does read
+> `~/.profile`; the shape without any startup file is the plain `bash -c` an
+> agent gets.) Do not rely on inheritance.
 >
-> Once per session, before the first `mdev` command, resolve it from the path the
-> installer recorded and use that path for the rest of the session:
+> Once per session, before the first `mdev` command, resolve it and use the
+> resolved path for the rest of the session:
 >
 > ```sh
-> command -v mdev || jq -er '.bin // empty | . + "/mdev"' ~/.config/movian-sdk/config.json
+> command -v mdev \
+>   || { p="$(jq -er '.bin // empty' "${MOVIAN_SDK_CONFIG:-$HOME/.config/movian-sdk/config.json}")/mdev" \
+>        && [ -x "$p" ] && printf '%s\n' "$p"; } \
+>   || { p="${MOVIAN_SDK_BINDIR:-$HOME/.local/bin}/mdev"; [ -x "$p" ] && printf '%s\n' "$p"; }
 > ```
 >
-> `jq -er` and `// empty` are both load-bearing. A config written before the `bin`
-> key existed contains only `core`, and plain `.bin + "/mdev"` would print
-> **`/mdev`** — a nonexistent path, reported as success, in exactly the session
-> this preamble exists for. As written it produces nothing and a non-zero status.
+> Three steps, each earning its place. `jq -er` with `// empty` because a config
+> written before the `bin` key existed would otherwise make `.bin + "/mdev"`
+> print **`/mdev`** — a nonexistent path, with exit 0. `[ -x ]` because a
+> recorded path that no longer exists must not be handed back as an answer. And
+> the last step because `./install.sh` **without** a core path installs the shims
+> and writes no config at all, so a config-only lookup would report "not
+> installed" on a machine where `mdev` is sitting in `~/.local/bin`.
 >
-> If neither answers, the SDK is not installed or predates this key — say so
-> rather than guessing a path, and rerun the installer:
+> If none of the three answers, the SDK really is absent here — say so rather
+> than guessing a path, and point at the installer:
 > `cd movian-plugin-sdk && ./install.sh /abs/path/to/movian/checkout`.
 > This preamble is repeated in every `movian:*` skill on purpose, because skills
-> load individually and you may be holding only this one.
+> load individually and you may be holding only this one. `tests/reachable_selftest.py`
+> asserts that all seven copies stay identical.
 
 
 Derived from the nine plugins that exist — HDRezka, trakt, m7-jellyfin, anilibria,
