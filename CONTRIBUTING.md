@@ -101,9 +101,14 @@ distribution ships, never against invented ones.
 Anything added here should be able to **fail** for a stated reason: this suite
 exists because `mdev types` now makes a claim about the core's artifact, and a
 claim nothing can falsify is the bug it was written to prevent. The reachability
-half earns its place the same way — four properties of its probe each produce a
-confident *wrong answer* rather than an error when omitted, so each has a case
-that fails without it.
+half earns its place the same way, and states its limits. Three properties of
+its probe each produce a confident *wrong answer* rather than an error when
+omitted — an unscrubbed `PATH`, a missing `</dev/null`, an unresolved tool path —
+and each has a case that fails when that property is removed, verified by
+removing it. A fourth, `timeout -s KILL`, is **not** provable here: measured,
+SIGTERM and SIGKILL give the same verdict, the same elapsed time and the same
+orphaned grandchild. It is kept as defence against a bash that ignores SIGTERM,
+and the case says so rather than claiming a green tick it has not earned.
 
 ## `salvage/`
 

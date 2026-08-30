@@ -19,6 +19,7 @@ confident wrong answer rather than an error -- and each has its own case here:
 Needs no Movian core and no SDK configuration. It needs git, bash, jq, awk and
 Python, and writes synthetic homes under TMPDIR.
 """
+import json
 import os
 import pathlib
 import shlex
@@ -449,6 +450,18 @@ def case_bindir_is_written_as_data_not_code(tmp):
                    stderr=subprocess.DEVNULL, timeout=30)
     ok("no command substitution fired", canary.exists(), False)
 
+    # Positive control. Without it this case would pass on a fixture where the
+    # ~/.bashrc is never sourced at all -- proving nothing about quoting and
+    # everything about the harness. The same payload written UNQUOTED must fire.
+    control = pathlib.Path(tmp) / "CONTROL"
+    (home / ".bashrc").write_text(f'x=$(touch {control})\n')
+    subprocess.run(["/bin/bash", "-ic", "true"],
+                   env={"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb"},
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL, timeout=30)
+    ok("the control DOES fire, so the fixture really is sourced",
+       control.exists(), True)
+
 
 def case_damaged_markers_refuse_rather_than_truncate(tmp):
     print("a half-open block is refused, not interpreted")
@@ -799,6 +812,45 @@ def case_a_shim_run_from_the_checkout_finds_its_library(tmp):
        "No such file or directory" in r.stderr, False)
 
 
+def case_doctor_is_the_second_caller(tmp):
+    """"One check, two callers" (#38) -- and the second was never exercised.
+
+    `mdev doctor` runs the same probe as install.sh and adds the bindir
+    comparison that is the only honest signal available for the agent shape. No
+    case invoked it, so half the contract was asserted by documentation alone.
+    """
+    print("mdev doctor runs the shared check and reports the recorded bindir")
+    home, bindir = fixture(tmp)
+    cfg = home / ".config" / "movian-sdk" / "config.json"
+    cfg.write_text(json.dumps({"core": "/nonexistent/core", "bin": str(bindir)}) + "\n")
+
+    shim = HERE.parent / "bin" / "mdev"
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb",
+           "MOVIAN_SDK_CONFIG": str(cfg),
+           "MOVIAN_SDK_LIB": str(HERE.parent / "lib")}
+    r = subprocess.run(["/bin/bash", str(shim), "doctor"], env=env,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, text=True, timeout=120)
+    # The core is deliberately absent, so doctor stops at the locator -- which is
+    # itself the assertion that reachability is NOT what gates it.
+    ok("it fails on the missing core, not on reachability",
+       "locator: UNRESOLVED" in r.stdout or "movian-sdk:" in r.stdout, True)
+
+    # With a usable core it reaches the reachability block. Only run this half
+    # where a real core is configured; otherwise say so rather than skip quietly.
+    real = pathlib.Path.home() / ".config" / "movian-sdk" / "config.json"
+    if not real.is_file():
+        print("  note  no core configured on this host -- the reachability half of")
+        print("        doctor is not exercised here")
+        return
+    r = subprocess.run(["/bin/bash", str(shim), "doctor"],
+                       env={**os.environ, "MOVIAN_SDK_LIB": str(HERE.parent / "lib")},
+                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, text=True, timeout=180)
+    ok("doctor reports the bindir", "bindir:" in r.stdout, True)
+    ok("and runs the same shared probe", "reachable: login" in r.stdout, True)
+
+
 def main():
     # No SKIP path. The suite used to return success when /etc/skel was absent,
     # so on a minimal container or a non-Debian host it reported OK without
@@ -841,6 +893,7 @@ def main():
         case_marker_whitespace_is_not_damage,
         case_diagnosis_without_a_prior_report_says_so,
         case_a_shim_run_from_the_checkout_finds_its_library,
+        case_doctor_is_the_second_caller,
     ]
     for c in cases:
         with tempfile.TemporaryDirectory() as tmp:

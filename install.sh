@@ -31,7 +31,10 @@ for arg in "$@"; do
   case "$arg" in
     --fix-path)   fixmode=apply ;;
     --unfix-path) fixmode=remove ;;
-    -h|--help)    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # Print the header comment, and stop at the first line that is not one.
+    # A fixed line range leaked `set -euo pipefail` and the line after it into
+    # the help text as soon as the header grew.
+    -h|--help)    sed -n '2,/^[^#]/p' "${BASH_SOURCE[0]}" | sed '/^[^#]/d; s/^# \{0,1\}//'; exit 0 ;;
     -*) echo "error: unknown option '$arg'" >&2; exit 1 ;;
     *)
       [ -z "$core" ] || { echo "error: more than one core path given" >&2; exit 1; }
@@ -109,7 +112,9 @@ else
   echo "No core configured. Either re-run with the checkout path:"
   echo "    ./install.sh /abs/path/to/movian"
   echo "or write $config yourself:"
-  echo "    {\"core\": \"/abs/path/to/movian\"}"
+  echo "    {\"core\": \"/abs/path/to/movian\", \"bin\": \"$bindir\"}"
+  echo "  the \"bin\" key is how the skills resolve mdev without PATH; a config"
+  echo "  without it makes them report the SDK as not installed."
 fi
 
 # Record WHERE the shims went. Until #34 nothing on the system knew: `bindir`
