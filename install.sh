@@ -176,5 +176,42 @@ fi
 # a command, not a gate (movian-plugin-sdk#3).
 
 echo
-echo "Verify from any plugin repo (not from the core):"
-echo "    mdev doctor"
+# THIS shell cannot see what was just installed unless the bindir was already on
+# its PATH before the script started -- PATH is inherited at exec time, and no
+# amount of installing changes a running process's environment. Saying so is the
+# difference between "it works, open a new terminal" and a user typing `mdev`,
+# getting `command not found`, and concluding the install failed.
+#
+# The test is which mdev WINS, not whether the directory appears in PATH. An
+# older shim earlier in PATH shadows the one just installed, and then
+# `mdev doctor` would report on a different executable entirely -- which is why
+# the probe above compares `command -v mdev` against "$bindir/mdev" rather than
+# testing membership. The same comparison decides the advice.
+this_shell_sees_it=0
+if [ "$(command -v mdev 2>/dev/null || true)" = "$bindir/mdev" ]; then
+  this_shell_sees_it=1
+fi
+
+echo
+if [ "$this_shell_sees_it" -eq 1 ]; then
+  echo "Verify from any plugin repo (not from the core):"
+  echo "    mdev doctor"
+elif [ "$MOVIAN_SDK_REACH_WORST" = UNREACHABLE ] &&
+     [ "${MOVIAN_SDK_REACH_LOGIN:-}" != REACHABLE ] &&
+     [ "${MOVIAN_SDK_REACH_INTERACTIVE:-}" != REACHABLE ]; then
+  # No fresh shell would find it either, so telling the reader to open a new
+  # terminal sends them to reproduce the same failure and contradicts the
+  # --fix-path advice printed just above.
+  echo "A new terminal will NOT help: no startup file puts $bindir on PATH."
+  echo "Apply the fix above first, then open a new terminal and verify:"
+  echo "    mdev doctor"
+else
+  echo "This shell will NOT see mdev: its PATH was fixed when it started, before"
+  echo "$bindir was installed. That is expected and is not a failed install."
+  echo
+  echo "Open a new terminal, or reload this one:"
+  echo "    exec \"\$SHELL\" -l"
+  echo
+  echo "Then verify from any plugin repo (not from the core):"
+  echo "    mdev doctor"
+fi
