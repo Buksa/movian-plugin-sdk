@@ -909,6 +909,74 @@ def case_undetermined_still_offers_the_remedy(tmp):
     ok("and it still offers --fix-path", "--fix-path" in r.stderr, True)
 
 
+# --- from the Codex review of PR #43 -----------------------------------------
+
+def case_advice_matches_what_a_fresh_shell_would_do(tmp):
+    """"Open a new terminal" is wrong when no startup file provides the bindir.
+
+    With a custom bindir absent from every startup file, both shapes come back
+    UNREACHABLE and a fresh shell reproduces the same failure -- so the closing
+    advice contradicted the `--fix-path` warning printed directly above it.
+    """
+    print("the closing advice depends on what a fresh shell would actually find")
+    home, _ = fixture(tmp, with_mdev=False)
+    odd = home / "opt" / "bin"; odd.mkdir(parents=True)
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb",
+           "MOVIAN_SDK_BINDIR": str(odd),
+           "MOVIAN_SDK_LIBDIR": str(home / ".local/lib/movian-sdk"),
+           "MOVIAN_SDK_CONFIG": str(home / ".config/movian-sdk/config.json")}
+    r = subprocess.run(["/bin/bash", str(INSTALLER)], env=env, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                       timeout=180)
+    ok("it says a new terminal will not help", "A new terminal will NOT help" in r.stdout, True)
+    ok("and does not promise a reload fixes it",
+       'exec "$SHELL" -l' in r.stdout, False)
+
+
+def case_a_shadowing_mdev_is_not_mistaken_for_success(tmp):
+    """PATH membership is not the question -- which mdev WINS is.
+
+    With another mdev earlier in PATH, the bindir is present and yet
+    `mdev doctor` would report on a different executable. The probe already
+    compares `command -v mdev` against "$bindir/mdev" for exactly this reason;
+    the advice now uses the same comparison.
+    """
+    print("an mdev shadowed earlier in PATH is not read as 'this shell sees it'")
+    home, bindir = fixture(tmp, with_mdev=False)
+    shadow = pathlib.Path(tmp) / "shadow"; shadow.mkdir()
+    (shadow / "mdev").write_text("#!/bin/sh\necho other\n")
+    (shadow / "mdev").chmod(0o755)
+    env = {"HOME": str(home), "PATH": f"{shadow}:{bindir}:/usr/bin:/bin", "TERM": "dumb",
+           "MOVIAN_SDK_BINDIR": str(bindir),
+           "MOVIAN_SDK_LIBDIR": str(home / ".local/lib/movian-sdk"),
+           "MOVIAN_SDK_CONFIG": str(home / ".config/movian-sdk/config.json")}
+    r = subprocess.run(["/bin/bash", str(INSTALLER)], env=env, stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                       timeout=180)
+    ok("it does not claim this shell already sees the shim",
+       "Verify from any plugin repo" in r.stdout.split("This shell will NOT")[0]
+       and "This shell will NOT" not in r.stdout, False)
+
+
+def case_the_timeout_advice_names_the_right_shape(tmp):
+    """`bash -ic` cannot diagnose a timeout that happened in the LOGIN shape."""
+    print("the timing advice names the shape that timed out, and a runnable retry")
+    home, bindir = fixture(tmp)
+    marker = wedge_marker(home)
+    # interactive fine, login wedged -- the reverse of the reported case.
+    (home / ".bashrc").write_text(f'PATH="{bindir}:$PATH"\n')
+    (home / ".profile").write_text(f"{marker}\n")
+    r = sh(f'movian_sdk_reachability_report "{bindir}" >/dev/null\n'
+           f'movian_sdk_explain_unreachable "{bindir}" "/repo" "$MOVIAN_SDK_REACH_WORST"',
+           home, extra_env={"MOVIAN_SDK_PROBE_TIMEOUT": "3"}, timeout=60)
+    kill_survivors(marker)
+    ok("it names the login shape", "bash -lc true" in r.stderr, True)
+    ok("and not the one that answered", "bash -ic true" in r.stderr, False)
+    # The retry must be runnable from a shell that cannot find mdev -- which is
+    # the very shell the installer prints this from.
+    ok("the retry uses an absolute path", f"{bindir}/mdev doctor" in r.stderr, True)
+
+
 def main():
     # No SKIP path. The suite used to return success when /etc/skel was absent,
     # so on a minimal container or a non-Debian host it reported OK without
@@ -955,6 +1023,10 @@ def main():
         # from a real install on a fresh Debian stand
         case_the_installing_shell_is_told_it_cannot_see_mdev,
         case_undetermined_still_offers_the_remedy,
+        # from the Codex review of PR #43
+        case_advice_matches_what_a_fresh_shell_would_do,
+        case_a_shadowing_mdev_is_not_mistaken_for_success,
+        case_the_timeout_advice_names_the_right_shape,
     ]
     for c in cases:
         with tempfile.TemporaryDirectory() as tmp:
