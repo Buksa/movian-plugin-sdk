@@ -1,0 +1,20 @@
+#define T(EN, RU) {select($core.i18n.iso639_1 == "ru", RU, EN)}
+#define BUTTON(ID, TITLE) {
+  widget(label, { id: ID; caption: TITLE; });
+}
+#include "KEEP-include.view"
+
+widget(container_y, {
+  // caption: "KEEP commented out";
+  widget(label, { caption: "SHOW caption"; });
+  widget(label, { caption: 'SHOW rich text'; });
+  widget(label, { caption: select($view.mode == "KEEP compared", "SHOW grid view", "SHOW list view"); });
+  widget(label, { caption: "SHOW channels: " + $self.metadata.channels; });
+  widget(label, { caption: strftime($self.time, "%d.%m %H:%M"); });
+  widget(label, { onEvent(activate, deliverEvent($self.eventSink, "KEEP Event Name")); });
+  widget(image, { source: "skin://icons/KEEP icon.svg"; });
+  BUTTON("KEEP-button-id", "SHOW macro title");
+  SKIN_MACRO("SHOW unknown macro argument");
+  widget(label, { caption: _("SHOW core catalog"); });
+  widget(label, { caption: T("SHOW english", "SHOW русский"); });
+});

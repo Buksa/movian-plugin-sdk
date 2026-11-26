@@ -1,0 +1,53 @@
+// Include in the player scope. The player owns qualityOpen and qualityCursor.
+widget(container_z, {
+  hidden: !$self.model.metadata.qualityOpen;
+  widget(quad, { color: 0; alpha: 0.45; });
+  widget(container_x, {
+    align: right;
+    widget(container_z, {
+      width: 13em;
+      widget(quad, { color: [0.075, 0.065, 0.09]; });
+      widget(container_y, {
+        padding: 0.65em;
+        align: top;
+        widget(label, {
+          caption: "Качество видео";
+          height: 2.1em;
+          align: left;
+          bold: true;
+          size: 1.05em;
+          color: 1;
+        });
+        widget(list_y, {
+          chaseFocus: true;
+          cloner($self.model.nodes, container_z, {
+            id: fmt("twitch-quality-%d", $self.metadata.index);
+            height: 1.8em;
+            focusable: 1;
+            $clone.selected = $self.metadata.title == $parent.model.metadata.quality;
+            onEvent(click, deliverEvent($self.eventSink, "Activate"));
+            widget(quad, {
+              color: [0.29, 0.18, 0.43];
+              alpha: select($self.metadata.index == $view.qualityCursor || isHovered(), 1,
+                            select($clone.selected, 0.48, 0));
+            });
+            widget(label, {
+              caption: select($clone.selected, "●  ", "     ") + $self.metadata.title;
+              padding: [0.45em, 0];
+              align: left;
+              color: 1;
+              size: 0.82em;
+            });
+          });
+        });
+        widget(label, {
+          caption: "← Назад в плеер";
+          height: 1.3em;
+          align: left;
+          color: 0.7;
+          size: 0.64em;
+        });
+      });
+    });
+  });
+});

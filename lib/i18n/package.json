@@ -1,0 +1,8 @@
+{
+  "name": "movian-plugin-i18n",
+  "private": true,
+  "description": "Lists a Movian plugin's user-visible strings for translation review",
+  "dependencies": {
+    "acorn": "8.19.0"
+  }
+}

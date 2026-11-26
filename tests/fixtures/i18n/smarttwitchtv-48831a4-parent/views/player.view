@@ -1,0 +1,65 @@
+// Keep the native video controls and put Twitch's quality picker above them.
+#define CLOSE_QUALITY() {
+  $self.model.metadata.qualityOpen = false;
+  focus("videowidget");
+}
+
+widget(container_z, {
+  $view.qualityCount = count($self.model.nodes);
+  $view.qualityButtonVisible = $clone.showPlaydeck && !$clone.osdpage &&
+                               $view.qualityCount > 0 && !$self.model.metadata.qualityOpen;
+  // The native row handles Right first; only its last button lets it bubble.
+  onEvent(right, { focus("twitch-quality-button"); }, $view.qualityButtonVisible);
+  // Close the quality overlay without consuming the native settings shortcut.
+  onEvent(menu, { $self.model.metadata.qualityOpen = false; },
+          $self.model.metadata.qualityOpen, false, true);
+  onEvent(back, { CLOSE_QUALITY(); }, $self.model.metadata.qualityOpen, true, true);
+  onEvent(cancel, { CLOSE_QUALITY(); }, $self.model.metadata.qualityOpen, true, true);
+  onEvent(left, { CLOSE_QUALITY(); }, $self.model.metadata.qualityOpen, true, true);
+
+  onEvent(up, {
+    $view.qualityCursor = ($view.qualityCursor + $view.qualityCount - 1) % $view.qualityCount;
+    focus(fmt("twitch-quality-%d", $view.qualityCursor));
+  }, $self.model.metadata.qualityOpen, true, true);
+  onEvent(down, {
+    $view.qualityCursor = ($view.qualityCursor + 1) % $view.qualityCount;
+    focus(fmt("twitch-quality-%d", $view.qualityCursor));
+  }, $self.model.metadata.qualityOpen, true, true);
+  onEvent(activate, deliverEvent($self.eventSink, fmt("TwitchQuality%d", $view.qualityCursor)),
+          $self.model.metadata.qualityOpen, true, true);
+  #include "skin://pages/video.view"
+
+  widget(container_y, {
+    align: bottom;
+    hidden: !$view.qualityButtonVisible;
+    padding: [0, 0, 0, select($self.media.canSeek, 2em + $ui.universeBottomHeight, 0)];
+    widget(container_x, {
+      align: right;
+      padding: [0.8em, 0];
+      widget(container_z, {
+        id: "twitch-quality-button";
+        height: 2.2em;
+        focusable: true;
+        onEvent(left, { focus("menu-btn"); });
+        onEvent(activate, {
+          $self.model.metadata.qualityOpen = true;
+          $view.qualityCursor = $self.model.metadata.qualityIndex;
+          focus(fmt("twitch-quality-%d", $view.qualityCursor));
+        });
+        widget(quad, {
+          color: select(isNavFocused() || isHovered(), [0.29, 0.18, 0.43], 0);
+          alpha: 0.85;
+        });
+        widget(label, {
+          caption: "Качество: " + $self.model.metadata.quality;
+          padding: [0.6em, 0.2em];
+          align: center;
+          size: 0.85em;
+          color: 1;
+        });
+      });
+    });
+  });
+
+  #include "quality-menu.view"
+});
