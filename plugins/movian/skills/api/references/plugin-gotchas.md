@@ -134,3 +134,102 @@ with `--pointer-is-touch`.
 
 A complete runnable implementation is available in
 `plugin_examples/listx_cloner`.
+
+## The Rest Below Was Found Building SmartTwitchTV
+
+Citations are to the core at `movian6` @ `0faa94a0d`; run evidence is the
+SmartTwitchTV plugin's git history.
+
+## `movian/store` Writes Five Seconds Late
+
+A store's setter only arms a timer; the file is written 5 s after the last
+change (`res/ecmascript/modules/movian/store.js:16-23`). There is a finalizer
+that writes a pending change (`store.js:41-46`), but quitting Movian within 5 s
+of a change lost it in a run: SmartTwitchTV stored a rotated Twitch refresh
+token, the old one was already invalid, and the next start logged the user out
+(SmartTwitchTV `540fa15`).
+
+For a value that must survive a quit, also write the same file at once. The
+store file is `Core.storagePath + '/store/' + name` (`store.js:59`) holding
+`JSON.stringify` of all keys (`store.js:21`), so write every key the store
+holds, not only the changed one:
+
+```js
+var fs = require('fs');
+var store = require('movian/store').create('account');
+var storeFile = Core.storagePath + '/store/account';
+
+function save(session) {
+  store.session = session;
+  fs.writeFileSync(storeFile, JSON.stringify({clientId: store.clientId, session: session}));
+}
+```
+
+## Set Up the Page Before the First Network Call
+
+In a route, set `page.type`, `page.loading = true` and
+`page.metadata.glwview` before fetching anything. `Route` does neither for you
+(`res/ecmascript/modules/movian/page.js:453-467`).
+
+- Fetching first and setting up the page after left a paginated grid that
+  never asked for its second page, stopping at 24 items (SmartTwitchTV
+  `3353f26`; observed, the mechanism was not traced in the core).
+- `mdev open` takes an absent `loading` that stays absent for 1 s as a
+  finished static page (`support/devtools/mdevlib/harness.py:1469-1503`,
+  `ABSENT_LOADING_SETTLE` at `:105`). A route still in its first request then
+  reports ready with 0 nodes.
+
+## Language: `global.i18n.iso639_1` Is Not ISO 639-1
+
+The core sets it to the first two letters of the chosen catalog's file name
+(`src/i18n.c:550-553`), not to a real language code. Catalog names in `lang/`
+include `sp_SP.lang`, `ua_UA.lang` and `dk_DK.lang`, so Spanish reads `sp`,
+Ukrainian `ua` and Danish `dk`. Map those yourself if you need real codes.
+
+Read it when you need it, never at module load. Dev plugins load in
+`plugins_init()` (`src/main.c:507`) and installed ones in the `swinst` thread
+started at `src/main.c:517`; `i18n_init()` runs after both, at
+`src/main.c:520`. At load time the value is unset or racing.
+
+Plugin JS gets no translation API, and GLW `_("...")` looks the string up in
+the core catalog only (`src/ui/glw/glw_view_parser.c:568-573`,
+`nls_get_prop()` at `src/i18n.c:384`). A plugin that wants its own
+translations ships its own tables and passes the strings to its views, e.g. as
+a `page.metadata` subtree (next section). A worked design:
+SmartTwitchTV `docs/i18n.md`.
+
+## Assigning an Object to `page.metadata` Makes a Prop Subtree
+
+`page.metadata.x = {a: 1, b: 2}` does not store an object: the prop proxy's
+setter creates child props and assigns each key
+(`res/ecmascript/modules/movian/prop.js:33-56`). A view reads them as
+`$self.model.metadata.x.a`. Assigning again merges keys into the existing
+subtree; keys missing from the new object are not removed.
+
+Inside an item cloner `$self` is the item, so reach the page through
+`$parent.model.metadata.x.a`: a clone's `$parent` is the `$self` of the scope
+the cloner was written in (`src/ui/glw/glw_view_eval.c:1446-1452`). In a
+cloner nested inside another cloner, that is the outer item, not the page.
+
+## Plugin `fs` Paths
+
+Plugin file access is refused with "Access not allowed" unless the path starts
+with the plugin's own `Plugin.path` or its `Core.storagePath`
+(`src/ecmascript/es_fs.c:84-108`). The manifest's
+`entitlements.bypassFileACLRead` / `bypassFileACLWrite` lift the check
+(`src/plugins.c:718-724`), and so does `--bypass-ecmascript-acl`, which
+`mdev preview` always passes, so a preview proves nothing about the ACL.
+
+Reading the plugin's own files works from an installed zip too, where
+`Plugin.path` is a `zip://` URL: `fs.readFileSync(Plugin.path + 'lang/ru.lang')`
+(SmartTwitchTV `i18n.js`).
+
+## Hand-Placed Installed Zips Need `<id>@<origin>.zip`
+
+Movian reads the origin from the part of the file name after `@` in
+`<persistent>/mrp/installed/` (`src/plugins.c:810-838`). A zip named without
+`@` passes a NULL origin to `plugin_make()`, whose `strdup(origin)`
+(`src/plugins.c:248`) crashes Movian at every start until the file is removed
+(Buksa/movian#297). The
+repository installer always writes the right name; this bites tests and
+side-loading only.

@@ -148,6 +148,12 @@ logic exists in this tree).
     (`glw_view_preproc.c:125-126`); mixing named and positional arguments
     in the same call is a hard error (`glw_view_preproc.c:168-172`,
     "Mixing named and unnamed arguments is not supported").
+  - **A body that ends in a parameter crashes the preprocessor** (SIGSEGV,
+    Movian goes down as the view loads): the substitution loop reads
+    `a->next->type` without checking `a->next` (`glw_view_preproc.c:237`,
+    Buksa/movian#296). `#define L(KEY) {$self.model.metadata.i18n.KEY}`
+    crashes; wrap the body so the parameter is not its last token:
+    `#define L(KEY) {($self.model.metadata.i18n.KEY)}`.
   - Macros are **block-bodied only** (`{ ... }` after the header,
     `glw_view_preproc.c:426-428`) — there is no expression-only macro form.
   - Corpus idiom: `#define ListItemBevel() { ... }` /
