@@ -100,8 +100,9 @@ where `/etc/skel/.bashrc` is absent: it asserts against the dotfiles a
 distribution ships, never against invented ones.
 
 The fourth checks `lib/i18n/extract.js` (see `lib/i18n/README.md`): one fixture
-case per rule, and SmartTwitchTV as it was before its English/Russian commit
-48831a4, where every string that commit translated must be found. The view half
+case per rule, and [SmartTwitchTV](https://github.com/Buksa/movian-plugin-twitchtv) as it was before its English/Russian
+commit [48831a4](https://github.com/Buksa/movian-plugin-twitchtv/commit/48831a4), where every string that commit translated must be found
+(the fixture is a copy, so the test runs offline). The view half
 needs the core's `movian-analyze`; without it the test says SKIPPED for views and
 checks the JS half only.
 

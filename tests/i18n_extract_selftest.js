@@ -2,7 +2,10 @@
 // Checks lib/i18n/extract.js against two fixtures:
 //   cases/                         one case per rule: SHOW strings are listed, KEEP strings are not
 //   smarttwitchtv-48831a4-parent/  SmartTwitchTV just before its English/Russian commit 48831a4:
-//                                  the tool must find every string that commit translated
+//                                  the tool must find every string that commit translated.
+//                                  Copied, so the test runs offline, from
+//                                  https://github.com/Buksa/movian-plugin-twitchtv at the parent of
+//                                  https://github.com/Buksa/movian-plugin-twitchtv/commit/48831a4
 // Views need the core's movian-analyze (`mdev core`); without it the view half is SKIPPED, said so.
 // Run: (cd lib/i18n && npm ci) && node tests/i18n_extract_selftest.js
 'use strict';
@@ -80,7 +83,7 @@ if (views) {
 }
 assert.ok(!report.notes.some(function(n) { return /already localized/.test(n); }), 'cases is not localized');
 
-// --- SmartTwitchTV before 48831a4: every string the commit put into t()/T()
+// --- SmartTwitchTV before 48831a4: every string the commit translated
 var translated = [
     // account-page.js
     'Вы вошли как ', 'Войдите, чтобы открыть полный каталог категорий.', 'Вход по коду отменён.', 'Войти по коду',

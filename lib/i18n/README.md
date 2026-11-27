@@ -2,7 +2,7 @@
 
 Lists a Movian plugin's user-visible strings (JS and GLW views) for a person to
 review before they are translated the way SmartTwitchTV does it (its
-`docs/i18n.md`): `t('English')` in JS with translations in `lang/<code>.lang`,
+[`docs/i18n.md`](https://github.com/Buksa/movian-plugin-twitchtv/blob/master/docs/i18n.md)): `t('English')` in JS with translations in `lang/<code>.lang`,
 and in views text by id, `L(key)` reading `$self.model.metadata.i18n`. `extract`
 changes nothing: plugin JS is parsed, never run, and nothing is written into the
 plugin. The rewrite (`apply`) is a later step.
@@ -38,6 +38,12 @@ Flags:
 - `already-localized` — inside `t()`/`_()`, or a view macro that reads `i18n` (`L()`, an older `T()`), or the whole plugin localizes already (`Core.getString`, reads `i18n.iso639_1`, its own UI-language setting, ships `.lang` files). Do not rewrite such a plugin; see the note at the top of the report.
 
 A note also says when strings are not in English: the English keys must then be written by hand.
+
+## Test fixture
+
+`tests/fixtures/i18n/smarttwitchtv-48831a4-parent/` is a copy of
+[SmartTwitchTV](https://github.com/Buksa/movian-plugin-twitchtv) at the parent of commit [48831a4](https://github.com/Buksa/movian-plugin-twitchtv/commit/48831a4), the commit
+that translated its UI. It is copied so the test runs offline.
 
 ## Limits
 
