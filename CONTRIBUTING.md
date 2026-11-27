@@ -69,6 +69,14 @@ claude plugin validate .
 
 The warning about a missing `version` is expected.
 
+## Review
+
+**A claim about Movian behaviour must show where it comes from:** a core
+`file:line` (name the branch or revision when it matters), or a run that shows
+it (a commit, an issue, an `mdev` session). A reviewer rejects a claim with
+neither, however plausible it reads. When the evidence is a run and the
+mechanism was not traced in the core, say so in the text.
+
 ## `tests/`
 
 Checks for the `install.sh` channel — the parts that are run rather than read.

@@ -177,8 +177,10 @@ HDRezka: 28 errors became 61, forty of them redeclarations.
 ## Gotchas that cost people time
 
 `references/plugin-gotchas.md` — the HTML parser's singular-vs-plural
-`getElement*` naming (and a compatibility wrapper for older Movian builds), and
-horizontal rows with `list_x`.
+`getElement*` naming (and a compatibility wrapper for older Movian builds),
+horizontal rows with `list_x`, `movian/store`'s 5 s delayed write, setting up a
+page before the first fetch, `global.i18n.iso639_1` and translations, object
+values in `page.metadata`, plugin `fs` path rules, and installed-zip names.
 
 ## When the API surface itself is wrong or missing
 
