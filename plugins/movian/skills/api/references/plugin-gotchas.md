@@ -138,7 +138,7 @@ A complete runnable implementation is available in
 ## The Rest Below Was Found Building SmartTwitchTV
 
 Citations are to the core at `movian6` @ `0faa94a0d`; run evidence is the
-SmartTwitchTV plugin's git history.
+[SmartTwitchTV](https://github.com/Buksa/movian-plugin-twitchtv) plugin's git history.
 
 ## `movian/store` Writes Five Seconds Late
 
@@ -147,7 +147,7 @@ change (`res/ecmascript/modules/movian/store.js:16-23`). There is a finalizer
 that writes a pending change (`store.js:41-46`), but quitting Movian within 5 s
 of a change lost it in a run: SmartTwitchTV stored a rotated Twitch refresh
 token, the old one was already invalid, and the next start logged the user out
-(SmartTwitchTV `540fa15`).
+([SmartTwitchTV 540fa15](https://github.com/Buksa/movian-plugin-twitchtv/commit/540fa15)).
 
 For a value that must survive a quit, also write the same file at once. The
 store file is `Core.storagePath + '/store/' + name` (`store.js:59`) holding
@@ -172,8 +172,8 @@ In a route, set `page.type`, `page.loading = true` and
 (`res/ecmascript/modules/movian/page.js:453-467`).
 
 - Fetching first and setting up the page after left a paginated grid that
-  never asked for its second page, stopping at 24 items (SmartTwitchTV
-  `3353f26`; observed, the mechanism was not traced in the core).
+  never asked for its second page, stopping at 24 items
+  ([SmartTwitchTV 3353f26](https://github.com/Buksa/movian-plugin-twitchtv/commit/3353f26); observed, the mechanism was not traced in the core).
 - `mdev open` takes an absent `loading` that stays absent for 1 s as a
   finished static page (`support/devtools/mdevlib/harness.py:1469-1503`,
   `ABSENT_LOADING_SETTLE` at `:105`). A route still in its first request then
@@ -196,7 +196,7 @@ the core catalog only (`src/ui/glw/glw_view_parser.c:568-573`,
 `nls_get_prop()` at `src/i18n.c:384`). A plugin that wants its own
 translations ships its own tables and passes the strings to its views, e.g. as
 a `page.metadata` subtree (next section). A worked design:
-SmartTwitchTV `docs/i18n.md`.
+[SmartTwitchTV docs/i18n.md](https://github.com/Buksa/movian-plugin-twitchtv/blob/master/docs/i18n.md).
 
 ## Assigning an Object to `page.metadata` Makes a Prop Subtree
 
@@ -222,7 +222,7 @@ with the plugin's own `Plugin.path` or its `Core.storagePath`
 
 Reading the plugin's own files works from an installed zip too, where
 `Plugin.path` is a `zip://` URL: `fs.readFileSync(Plugin.path + 'lang/ru.lang')`
-(SmartTwitchTV `i18n.js`).
+([SmartTwitchTV i18n.js](https://github.com/Buksa/movian-plugin-twitchtv/blob/master/i18n.js)).
 
 ## Hand-Placed Installed Zips Need `<id>@<origin>.zip`
 
