@@ -1,0 +1,14 @@
+{
+  "type": "ecmascript",
+  "apiversion": 2,
+  "id": "smarttwitchtv",
+  "file": "main.js",
+  "showtimeVersion": "5.0",
+  "version": "1.3.4",
+  "title": "SmartTwitchTV",
+  "category": "video",
+  "icon": "logo.svg",
+  "homepage": "https://github.com/fgl27/SmartTwitchTV",
+  "synopsis": "Twitch broadcasts, recordings and clips",
+  "description": "Twitch live streams, recordings and clips in a native TV interface inspired by SmartTwitchTV."
+}

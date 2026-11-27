@@ -1,0 +1,443 @@
+// Raw page: the standard Movian directory chrome would double the TV rail.
+delta($ui.hideClock, isVisible());
+
+$view.mode = $self.model.metadata.mode;
+$view.section = $self.model.metadata.section;
+$view.compact = $view.mode == "video" && ($view.section == "videos" || $view.section == "clips");
+$view.total = count($self.model.nodes);
+$view.columns = select($view.mode == "poster", select($ui.aspect > 1, 5, 3),
+                       select($view.mode == "cards" || $view.compact, select($ui.aspect > 1, 4, 2),
+                       select($ui.aspect > 1, 3, 1)));
+$view.rows = select($view.compact, select($ui.aspect > 1, 3, 4),
+                    select($view.mode == "detail", 2, select($ui.aspect > 1, 2, 3)));
+$view.catalogTotal = $self.model.metadata.catalogTotal ?? $view.total;
+$view.railProgress = scurve(select($view.rail, 1, 0), 0.3);
+$view.railText = clamp(($view.railProgress - 0.3) / 0.7, 0, 1);
+
+#define OPEN_RAIL() {
+  $view.rail = true;
+  focus("twitch-nav-" + ($self.model.metadata.section ?? "streams"));
+}
+
+#define CLOSE_RAIL() {
+  $view.rail = false;
+  focus("twitch-grid");
+}
+
+#define NAV(KEY, TITLE, ICON, ACTION) {
+  widget(container_z, {
+    id: "twitch-nav-" + KEY;
+    height: 1.74em;
+    focusable: select($self.model.metadata.section == KEY, 1, 0.9);
+    onEvent(activate, ACTION);
+    onEvent(right, { CLOSE_RAIL(); });
+    widget(quad, {
+      color: select(isNavFocused() || isHovered(), [0.25, 0.16, 0.34], [0.14, 0.14, 0.16]);
+      alpha: select(isNavFocused() || isHovered() || $self.model.metadata.section == KEY, 1, 0);
+    });
+    widget(container_x, {
+      widget(container_z, {
+        width: 2.45em;
+        widget(icon, { source: ICON; size: 1.12em; color: 0.96; });
+      });
+      widget(label, {
+        caption: TITLE;
+        alpha: $view.railText;
+        align: left;
+        padding: [0.45em, 0, 0, 0];
+        weight: 1;
+        color: 0.95;
+        size: 0.9em;
+        ellipsize: true;
+        filterConstraintX: true;
+      });
+    });
+  });
+}
+
+#define CONTEXT_LINK(TITLE, TARGET, ID) {
+  widget(container_z, {
+    id: ID;
+    height: 1.8em;
+    hidden: !TARGET;
+    focusable: 1;
+    onEvent(activate, navOpen(TARGET));
+    widget(quad, { color: [0.25, 0.16, 0.34]; alpha: select(isNavFocused() || isHovered(), 1, 0); });
+    widget(label, {
+      caption: TITLE;
+      align: left;
+      padding: [0.55em, 0];
+      size: 0.78em;
+      maxlines: 1;
+      ellipsize: true;
+      filterConstraintX: true;
+    });
+  });
+}
+
+onEvent(menu, { OPEN_RAIL(); }, !$view.rail && !$view.context);
+onEvent(menu, { CLOSE_RAIL(); }, $view.rail);
+onEvent(left, { OPEN_RAIL(); }, !$view.rail && !$view.context && !$view.total);
+onEvent(back, { CLOSE_RAIL(); }, $view.rail);
+onEvent(cancel, { CLOSE_RAIL(); }, $view.rail);
+onEvent(back, { $view.context = false; focus("twitch-grid"); }, $view.context);
+onEvent(cancel, { $view.context = false; focus("twitch-grid"); }, $view.context);
+onEvent(itemMenu, { $view.context = false; focus("twitch-grid"); }, $view.context);
+onEvent(back, deliverEvent($self.eventSink, "TwitchCancelLogin"), $view.section == "account" && !$view.rail, false);
+onEvent(cancel, deliverEvent($self.eventSink, "TwitchCancelLogin"), $view.section == "account" && !$view.rail, false);
+
+widget(container_z, {
+  widget(quad, { color: 0; });
+
+  widget(container_x, {
+    widget(dummy, { width: 2.85em; });
+    widget(container_y, {
+      weight: 1;
+      align: top;
+      filterConstraintX: true;
+      padding: [0.05em, 0, 0.85em, 0];
+
+      widget(container_z, {
+        height: 2.35em;
+        widget(label, {
+          caption: $self.model.metadata.title;
+          align: top;
+          padding: [7em, 0.12em, 7em, 0];
+          color: 1;
+          bold: true;
+          size: 1.17em;
+          ellipsize: true;
+        });
+        widget(label, {
+          caption: "← Меню   ·   OK Открыть";
+          align: topLeft;
+          padding: [0, 0.12em];
+          color: 0.66;
+          bold: true;
+          size: 0.53em;
+        });
+        widget(label, {
+          caption: strftime($core.clock.unixtime, "%d.%m · %H:%M");
+          align: topRight;
+          padding: [0, 0.12em];
+          color: 0.94;
+          bold: true;
+          size: 0.88em;
+        });
+      });
+
+      widget(container_x, {
+        hidden: $view.mode != "detail";
+        height: select($view.section == "account", 6.3em, 5em);
+        spacing: 0.85em;
+        padding: [0.1em, 0, 0, 0.4em];
+        widget(image, { width: 4em; source: $self.model.metadata.logo; });
+        widget(container_y, {
+          weight: 1;
+          align: center;
+          filterConstraintX: true;
+          spacing: 0.12em;
+          widget(label, {
+            caption: $self.model.metadata.title;
+            color: 1;
+            bold: true;
+            size: 1.3em;
+            align: left;
+            ellipsize: true;
+          });
+          widget(label, {
+            caption: $self.model.metadata.detail;
+            hidden: !$self.model.metadata.detail;
+            color: 0.65;
+            size: 0.8em;
+            align: left;
+          });
+          widget(label, {
+            hidden: !$self.model.metadata.accountCode;
+            caption: $self.model.metadata.accountCode;
+            align: left;
+            bold: true;
+            color: 1;
+            size: 1.45em;
+          });
+        });
+      });
+
+      widget(container_z, {
+        weight: 1;
+        filterConstraintY: true;
+        widget(array, {
+          id: "twitch-grid";
+          childTilesX: $view.columns;
+          childTilesY: $view.rows;
+          align: top;
+          margin: select($view.mode == "poster", [1em, 0, 1em, 0], [0, 0, 0, 0]);
+          Xspacing: select($view.mode == "poster", 0.9em, 0.52em);
+          // Compact rows may be laid out at zero height during page transitions.
+          // Put their vertical gutter inside each tile to keep GLW row heights nonnegative.
+          Yspacing: select($view.compact, 0, 0.74em);
+          chaseFocus: true;
+          $view.index = focusedIndex() + 1;
+
+          cloner($self.model.nodes, container_z, {
+            $clone.video = $self.type == "video";
+            $clone.game = $self.metadata.kind == "game";
+            $clone.art = $self.metadata.icon;
+            focusable: 2;
+            filterConstraintY: true;
+            onEvent(left, {
+              $view.rail = true;
+              focus("twitch-nav-" + ($parent.model.metadata.section ?? "streams"));
+            }, cloneIndex() % $view.columns == 0);
+            onEvent(activate, navOpen($self.url), $self.type != "action");
+            onEvent(activate, deliverEvent($self.eventSink, "Activate"), $self.type == "action");
+            onEvent(itemMenu, {
+              $view.contextTitle = $self.metadata.artist;
+              $view.contextChannel = $self.metadata.channelUrl;
+              $view.contextCategory = $self.metadata.categoryUrl;
+              $view.context = true;
+              focus("twitch-context-channel");
+            }, $self.metadata.channelUrl);
+
+            widget(quad, {
+              margin: [0, 0, 0, select($view.compact, 0.55em, 0)];
+              color: select(isNavFocused() || isHovered(), [0.85, 0.79, 0.92], 0);
+            });
+            widget(container_z, {
+              margin: [1, 1, 1, 1 + select($view.compact, 0.55em, 0)];
+              widget(quad, { color: select(isNavFocused() || isHovered(), [0.09, 0.07, 0.11], 0); });
+              widget(container_y, {
+                align: top;
+                widget(container_z, {
+                  weight: 1;
+                  filterConstraintY: true;
+                  widget(quad, { color: [0.065, 0.06, 0.08]; });
+                  widget(image, { source: $clone.art; hidden: !$clone.art; });
+                  widget(icon, {
+                    hidden: isSet($clone.art);
+                    source: translate($self.metadata.kind, "skin://icons/ic_folder_48px.svg",
+                                      "live", "skin://icons/ic_play_arrow_48px.svg",
+                                      "vod", "skin://icons/ic_local_movies_48px.svg",
+                                      "clip", "skin://icons/ic_movie_48px.svg",
+                                      "channel", "skin://icons/ic_person_48px.svg",
+                                      "game", "skin://icons/ic_apps_48px.svg");
+                    size: 2em;
+                    color: 0.42;
+                  });
+                  widget(container_y, {
+                    align: bottom;
+                    hidden: !$self.metadata.duration;
+                    widget(container_x, {
+                      align: right;
+                      padding: [0, 0, 0.35em, 0.25em];
+                      widget(container_z, {
+                        widget(quad, { color: 0; alpha: 0.78; });
+                        widget(label, {
+                          caption: value2duration($self.metadata.duration);
+                          size: 0.66em;
+                          padding: [0.22em, 0.11em];
+                          color: 1;
+                        });
+                      });
+                    });
+                  });
+                });
+                widget(container_y, {
+                  align: top;
+                  padding: [0.16em, 0.12em, 0.16em, 0.06em];
+                  widget(container_x, {
+                    height: 0.82em;
+                    spacing: 0.19em;
+                    widget(label, {
+                      caption: "●";
+                      color: [1, 0.08, 0.16];
+                      size: 0.66em;
+                      hidden: $self.metadata.kind != "live" && !$self.metadata.live;
+                    });
+                    widget(label, {
+                      weight: 1;
+                      filterConstraintX: true;
+                      caption: select($clone.video, $self.metadata.artist ?? "Twitch", $self.metadata.title);
+                      align: left;
+                      bold: true;
+                      size: 0.74em;
+                      color: 1;
+                      ellipsize: true;
+                    });
+                    widget(label, {
+                      caption: "[" + $self.metadata.language + "]";
+                      size: 0.61em;
+                      hidden: $view.compact || !$self.metadata.language;
+                      color: 0.83;
+                    });
+                    widget(label, {
+                      hidden: !$view.compact || isVoid($self.metadata.count);
+                      caption: value2quantity($self.metadata.count) + " просмотров";
+                      size: 0.59em;
+                      color: 0.76;
+                    });
+                  });
+                  widget(label, {
+                    hidden: !$clone.game || !$self.metadata.channels;
+                    height: 0.65em;
+                    caption: "Каналы: " + $self.metadata.channels;
+                    align: left;
+                    size: 0.62em;
+                    color: 0.87;
+                    ellipsize: true;
+                  });
+                  widget(label, {
+                    hidden: !$clone.game || !$self.metadata.viewers;
+                    height: 0.65em;
+                    caption: "Зрители: " + $self.metadata.viewers;
+                    align: left;
+                    size: 0.62em;
+                    color: 0.87;
+                    ellipsize: true;
+                  });
+                  widget(label, {
+                    hidden: !$clone.video;
+                    height: select($view.compact, 1.33em, 1.47em);
+                    caption: $self.metadata.title;
+                    align: topLeft;
+                    bold: true;
+                    size: 0.64em;
+                    maxlines: 2;
+                    ellipsize: true;
+                    filterConstraintX: true;
+                    color: 0.95;
+                  });
+                  widget(label, {
+                    hidden: !$clone.video || $view.compact;
+                    height: 0.7em;
+                    caption: $self.metadata.game ?? "";
+                    align: left;
+                    size: 0.64em;
+                    ellipsize: true;
+                    color: 0.8;
+                  });
+                  widget(label, {
+                    hidden: !$clone.video || $view.compact;
+                    height: 0.72em;
+                    caption: select($self.metadata.started,
+                                    value2duration($core.clock.unixtime - $self.metadata.started) + " · ", "") +
+                             select(isSet($self.metadata.count), value2quantity($self.metadata.count) +
+                                    select($self.metadata.kind == "live", " зрителей", " просмотров"), "");
+                    align: left;
+                    size: 0.63em;
+                    color: 0.76;
+                    ellipsize: true;
+                  });
+                });
+              });
+            });
+          });
+        });
+        widget(label, {
+          hidden: $view.total || (!$self.model.loading && !$self.model.metadata.notice);
+          caption: select($self.model.loading, "Загрузка Twitch…", $self.model.metadata.notice);
+          align: center;
+          size: 0.9em;
+          color: 0.78;
+        });
+      });
+      widget(container_x, {
+        height: 1.15em;
+        widget(label, {
+          weight: 1;
+          caption: select($view.total, $self.model.metadata.notice ?? "", "");
+          align: left;
+          size: 0.55em;
+          color: 0.76;
+          ellipsize: true;
+        });
+        widget(label, {
+          hidden: !$view.total;
+          caption: fmt("%d / %d", clamp($view.index, 1, $view.total), $view.catalogTotal);
+          bold: true;
+          size: 0.85em;
+          color: 0.95;
+        });
+      });
+    });
+  });
+
+  widget(container_x, {
+    widget(container_z, {
+      width: 2.45em + 7.55em * $view.railProgress;
+      widget(quad, { color: 0; });
+      widget(container_y, {
+        align: top;
+        widget(container_x, {
+          height: 2.6em;
+          widget(container_z, {
+            width: 2.45em;
+            widget(icon, { source: "../logo.svg"; size: 1.35em; });
+          });
+          widget(label, {
+            alpha: $view.railText;
+            caption: "SmartTwitchTV";
+            bold: true;
+            size: 0.8em;
+            color: 1;
+            align: left;
+            padding: [0.45em, 0, 0, 0];
+            ellipsize: true;
+            filterConstraintX: true;
+            weight: 1;
+          });
+        });
+        space(0.58);
+        NAV("account", "Аккаунт Twitch", "skin://icons/ic_person_48px.svg", navOpen("smarttwitchtv:account"));
+        NAV("search", "Поиск", "skin://icons/ic_search_48px.svg", deliverEvent($self.eventSink, "TwitchSearch"));
+        space(0.35);
+        NAV("favorites", "Избранное", "skin://icons/ic_favorite_48px.svg", navOpen("smarttwitchtv:favorites"));
+        NAV("streams", "Прямые эфиры", "skin://icons/ic_play_arrow_48px.svg", navOpen("smarttwitchtv:streams"));
+        NAV("games", "Категории", "skin://icons/ic_apps_48px.svg", navOpen("smarttwitchtv:categories"));
+        NAV("videos", "Записи", "skin://icons/ic_local_movies_48px.svg", navOpen("smarttwitchtv:videos"));
+        NAV("clips", "Клипы", "skin://icons/ic_movie_48px.svg", navOpen("smarttwitchtv:clips"));
+        space(1);
+        widget(label, {
+          alpha: $view.railText;
+          height: 1.15em;
+          filterConstraintX: true;
+          ellipsize: true;
+          caption: "→ Закрыть меню";
+          padding: [0.42em, 0.3em];
+          align: left;
+          size: 0.57em;
+          color: 0.66;
+        });
+      });
+    });
+    space(1);
+  });
+
+  widget(container_z, {
+    hidden: !$view.context;
+    widget(quad, { color: 0; alpha: 0.67; });
+    widget(container_x, {
+      align: center;
+      widget(container_y, {
+        align: center;
+        width: 15em;
+        widget(container_z, {
+          height: 6.5em;
+          widget(quad, { color: [0.075, 0.065, 0.09]; });
+          widget(container_y, {
+            padding: 0.55em;
+            widget(label, {
+              caption: $view.contextTitle;
+              height: 1.7em;
+              bold: true;
+              size: 0.95em;
+              color: 1;
+            });
+            CONTEXT_LINK("Открыть канал", $view.contextChannel, "twitch-context-channel");
+            CONTEXT_LINK("Открыть категорию", $view.contextCategory, "twitch-context-game");
+          });
+        });
+      });
+    });
+  });
+});
