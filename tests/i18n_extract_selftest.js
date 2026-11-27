@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Checks lib/i18n/extract.js against two fixtures:
 //   cases/                         one case per rule: SHOW strings are listed, KEEP strings are not
-//   smarttwitchtv-48831a4-parent/  SmartTwitchTV just before its English/Russian commit 48831a4:
+//   smarttwitchtv-48831a4-parent/  STT for Movian (formerly SmartTwitchTV) just before its English/Russian commit 48831a4:
 //                                  the tool must find every string that commit translated.
 //                                  Copied, so the test runs offline, from
-//                                  https://github.com/Buksa/movian-plugin-twitchtv at the parent of
-//                                  https://github.com/Buksa/movian-plugin-twitchtv/commit/48831a4
+//                                  https://github.com/Buksa/movian-plugin-stt at the parent of
+//                                  https://github.com/Buksa/movian-plugin-stt/commit/48831a4
 // Views need the core's movian-analyze (`mdev core`); without it the view half is SKIPPED, said so.
 // Run: (cd lib/i18n && npm ci) && node tests/i18n_extract_selftest.js
 'use strict';
@@ -83,7 +83,7 @@ if (views) {
 }
 assert.ok(!report.notes.some(function(n) { return /already localized/.test(n); }), 'cases is not localized');
 
-// --- SmartTwitchTV before 48831a4: every string the commit translated
+// --- STT for Movian before 48831a4: every string the commit translated
 var translated = [
     // account-page.js
     'Вы вошли как ', 'Войдите, чтобы открыть полный каталог категорий.', 'Вход по коду отменён.', 'Войти по коду',
@@ -125,9 +125,9 @@ var missed = translated.filter(function(s) { return !texts.some(function(text) {
 assert.deepStrictEqual(missed, [], 'not found');
 // The commit left this console line untranslated (only made English): it is a log, not UI.
 assert.ok(!texts.some(function(text) { return /статистика категорий/.test(text); }), 'log line listed');
-// Listed but not translated by the commit: the brand name, three times. Anything new here is a new false positive.
+// Listed but not translated by the commit: the plugin's old brand name, three times. Anything new here is a new false positive.
 var extra = stv.entries.filter(function(e) { return !/[а-яё]/i.test(e.text); }).map(function(e) { return e.text; });
 assert.deepStrictEqual(extra.sort(), (views ? ['SmartTwitchTV', 'SmartTwitchTV', 'Twitch'] : ['SmartTwitchTV']).sort());
 
-console.log('ok: ' + report.entries.length + ' case entries, ' + stv.entries.length + ' SmartTwitchTV entries' +
+console.log('ok: ' + report.entries.length + ' case entries, ' + stv.entries.length + ' STT for Movian entries' +
     (views ? '' : ' (views SKIPPED)'));

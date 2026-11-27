@@ -1,8 +1,8 @@
 # Plugin i18n: `extract`
 
 Lists a Movian plugin's user-visible strings (JS and GLW views) for a person to
-review before they are translated the way SmartTwitchTV does it (its
-[`docs/i18n.md`](https://github.com/Buksa/movian-plugin-twitchtv/blob/master/docs/i18n.md)): `t('English')` in JS with translations in `lang/<code>.lang`,
+review before they are translated the way STT for Movian (formerly SmartTwitchTV) does it (its
+[`docs/i18n.md`](https://github.com/Buksa/movian-plugin-stt/blob/master/docs/i18n.md)): `t('English')` in JS with translations in `lang/<code>.lang`,
 and in views text by id, `L(key)` reading `$self.model.metadata.i18n`. `extract`
 changes nothing: plugin JS is parsed, never run, and nothing is written into the
 plugin. The rewrite (`apply`) is a later step.
@@ -42,12 +42,12 @@ A note also says when strings are not in English: the English keys must then be 
 ## Test fixture
 
 `tests/fixtures/i18n/smarttwitchtv-48831a4-parent/` is a copy of
-[SmartTwitchTV](https://github.com/Buksa/movian-plugin-twitchtv) at the parent of commit [48831a4](https://github.com/Buksa/movian-plugin-twitchtv/commit/48831a4), the commit
+[STT for Movian](https://github.com/Buksa/movian-plugin-stt) at the parent of commit [48831a4](https://github.com/Buksa/movian-plugin-stt/commit/48831a4), the commit
 that translated its UI. It is copied so the test runs offline.
 
 ## Limits
 
 - Flow is followed inside one file: through local functions, variables, return values and `table[key]` lookups, by name rather than by scope. Strings that reach the screen through another module (`require('./strings')`) are `no-sink` at best.
-- A stored or compared value that is also shown (SmartTwitchTV's quality label) cannot be told apart by reading; the apply step must not trust a `candidate` there blindly.
+- A stored or compared value that is also shown (STT for Movian's quality label) cannot be told apart by reading; the apply step must not trust a `candidate` there blindly.
 - Macros from every view are visible to every view.
 - Template literals are not read (Duktape is ES5).
